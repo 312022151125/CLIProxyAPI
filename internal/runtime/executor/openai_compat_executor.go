@@ -104,6 +104,8 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	if opts.Alt == "responses/compact" {
 		to = sdktranslator.FromString("openai-response")
 		endpoint = "/responses/compact"
+	} else if from.String() == "openai-response" {
+		to = sdktranslator.FromString("openai-response")
 	}
 	originalPayloadSource := req.Payload
 	if len(opts.OriginalRequest) > 0 {
@@ -304,6 +306,13 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("openai")
+	endpoint := openAICompatEndpointPath(opts)
+	if opts.Alt == "responses/compact" {
+		to = sdktranslator.FromString("openai-response")
+		endpoint = "/responses/compact"
+	} else if from.String() == "openai-response" {
+		to = sdktranslator.FromString("openai-response")
+	}
 	originalPayloadSource := req.Payload
 	if len(opts.OriginalRequest) > 0 {
 		originalPayloadSource = opts.OriginalRequest
@@ -326,7 +335,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	translated, _ = sjson.SetBytes(translated, "stream_options.include_usage", true)
 	reporter.SetTranslatedReasoningEffort(translated, to.String())
 
-	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
+	url := strings.TrimSuffix(baseURL, "/") + endpoint
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(translated))
 	if err != nil {
 		return nil, err
@@ -386,6 +395,10 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	out := make(chan cliproxyexecutor.StreamChunk)
 	go func() {
 		defer close(out)
+		if from.String() == "openai-response" && opts.Alt != "responses/compact" {
+			e.forwardNativeResponsesStream(ctx, httpResp, out, reporter)
+			return
+		}
 		decodedBody, decodeErr := decodeResponseBody(httpResp.Body, httpResp.Header.Get("Content-Encoding"))
 		if decodeErr != nil {
 			helps.RecordAPIResponseError(ctx, e.cfg, decodeErr)
@@ -471,7 +484,71 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	}()
 	return &cliproxyexecutor.StreamResult{Headers: httpResp.Header.Clone(), Chunks: out}, nil
 }
-
+func (e *OpenAICompatExecutor) forwardNativeResponsesStream(ctx context.Context, httpResp *http.Response, out chan<- cliproxyexecutor.StreamChunk, reporter *helps.UsageReporter) {
+	decodedBody, decodeErr := decodeResponseBody(httpResp.Body, httpResp.Header.Get("Content-Encoding"))
+	if decodeErr != nil {
+		helps.RecordAPIResponseError(ctx, e.cfg, decodeErr)
+		if errClose := httpResp.Body.Close(); errClose != nil {
+			log.Errorf("openai compat executor: close response body error: %v", errClose)
+		}
+		reporter.PublishFailure(ctx, decodeErr)
+		select {
+		case out <- cliproxyexecutor.StreamChunk{Err: decodeErr}:
+		case <-ctx.Done():
+		}
+		return
+	}
+	defer func() {
+		if errClose := decodedBody.Close(); errClose != nil {
+			log.Errorf("openai compat executor: close decoded response body error: %v", errClose)
+		}
+	}()
+	scanner := bufio.NewScanner(decodedBody)
+	scanner.Buffer(nil, 52_428_800) // 50MB
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		helps.AppendAPIResponseChunk(ctx, e.cfg, line)
+		payload := append(bytes.Clone(line), '\n')
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
+			select {
+			case out <- cliproxyexecutor.StreamChunk{Payload: payload}:
+			case <-ctx.Done():
+				return
+			}
+			continue
+		}
+		if !bytes.HasPrefix(trimmed, []byte("data:")) && !bytes.HasPrefix(trimmed, []byte("event:")) &&
+			!bytes.HasPrefix(trimmed, []byte(":")) && !bytes.HasPrefix(trimmed, []byte("id:")) &&
+			!bytes.HasPrefix(trimmed, []byte("retry:")) {
+			if bytes.HasPrefix(trimmed, []byte("{")) || bytes.HasPrefix(trimmed, []byte("[")) {
+				streamErr := statusErr{code: http.StatusBadGateway, msg: string(trimmed)}
+				helps.RecordAPIResponseError(ctx, e.cfg, streamErr)
+				reporter.PublishFailure(ctx, streamErr)
+				select {
+				case out <- cliproxyexecutor.StreamChunk{Err: streamErr}:
+				case <-ctx.Done():
+				}
+				return
+			}
+			continue
+		}
+		select {
+		case out <- cliproxyexecutor.StreamChunk{Payload: payload}:
+		case <-ctx.Done():
+			return
+		}
+	}
+	if errScan := scanner.Err(); errScan != nil {
+		helps.RecordAPIResponseError(ctx, e.cfg, errScan)
+		reporter.PublishFailure(ctx, errScan)
+		select {
+		case out <- cliproxyexecutor.StreamChunk{Err: errScan}:
+		case <-ctx.Done():
+		}
+	}
+	reporter.EnsurePublished(ctx)
+}
 func (e *OpenAICompatExecutor) executeImagesStream(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, endpointPath string) (_ *cliproxyexecutor.StreamResult, err error) {
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
 
@@ -648,6 +725,9 @@ func openAICompatEndpointPath(opts cliproxyexecutor.Options) string {
 	path := helps.PayloadRequestPath(opts)
 	if strings.HasSuffix(path, "/embeddings") {
 		return "/embeddings"
+	}
+	if opts.SourceFormat.String() == "openai-response" && opts.Alt != "responses/compact" {
+		return "/responses"
 	}
 	return "/chat/completions"
 }

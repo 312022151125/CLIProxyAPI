@@ -3345,7 +3345,21 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 								suspendReason = "unauthorized"
 								shouldSuspendModel = true
 							}
-						case 402, 403:
+						case http.StatusPaymentRequired:
+							if shouldApplyAPIKeyPaymentExhaustedCooldown(auth, statusCode) {
+								applyAPIKeyPaymentExhaustedCooldown(auth, state, result.Error, now)
+								suspendReason = "payment_required"
+								shouldSuspendModel = true
+								setModelQuota = true
+							} else if disableCooling {
+								state.NextRetryAfter = time.Time{}
+							} else {
+								next := now.Add(30 * time.Minute)
+								state.NextRetryAfter = next
+								suspendReason = "payment_required"
+								shouldSuspendModel = true
+							}
+						case http.StatusForbidden:
 							if disableCooling {
 								state.NextRetryAfter = time.Time{}
 							} else {
@@ -3868,6 +3882,51 @@ func isRequestInvalidError(err error) bool {
 	}
 }
 
+// apiKeyPaymentExhaustedCooldown keeps config-sourced API keys out of rotation after HTTP 402.
+const apiKeyPaymentExhaustedCooldown = 10 * 365 * 24 * time.Hour
+
+func shouldApplyAPIKeyPaymentExhaustedCooldown(auth *Auth, statusCode int) bool {
+	if auth == nil || statusCode != http.StatusPaymentRequired {
+		return false
+	}
+	return isAPIKeyAuth(auth)
+}
+
+func applyAPIKeyPaymentExhaustedCooldown(auth *Auth, state *ModelState, resultErr *Error, now time.Time) {
+	if auth == nil {
+		return
+	}
+	next := now.Add(apiKeyPaymentExhaustedCooldown)
+	message := "payment_required"
+	if resultErr != nil && strings.TrimSpace(resultErr.Message) != "" {
+		message = strings.TrimSpace(resultErr.Message)
+	}
+	quota := QuotaState{
+		Exceeded:      true,
+		Reason:        "payment_required",
+		NextRecoverAt: next,
+	}
+	auth.Unavailable = true
+	auth.Status = StatusError
+	auth.NextRetryAfter = next
+	auth.StatusMessage = message
+	auth.Quota = quota
+	auth.UpdatedAt = now
+	if resultErr != nil {
+		auth.LastError = cloneError(resultErr)
+	}
+	if state != nil {
+		state.Unavailable = true
+		state.Status = StatusError
+		state.NextRetryAfter = next
+		state.StatusMessage = message
+		state.Quota = quota
+		state.UpdatedAt = now
+		if resultErr != nil {
+			state.LastError = cloneError(resultErr)
+		}
+	}
+}
 func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Duration, now time.Time, disableCooling bool) {
 	if auth == nil {
 		return
@@ -3905,7 +3964,18 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 		} else {
 			auth.NextRetryAfter = now.Add(30 * time.Minute)
 		}
-	case 402, 403:
+	case http.StatusPaymentRequired:
+		if shouldApplyAPIKeyPaymentExhaustedCooldown(auth, statusCode) {
+			applyAPIKeyPaymentExhaustedCooldown(auth, nil, resultErr, now)
+			return
+		}
+		auth.StatusMessage = "payment_required"
+		if disableCooling {
+			auth.NextRetryAfter = time.Time{}
+		} else {
+			auth.NextRetryAfter = now.Add(30 * time.Minute)
+		}
+	case http.StatusForbidden:
 		auth.StatusMessage = "payment_required"
 		if disableCooling {
 			auth.NextRetryAfter = time.Time{}

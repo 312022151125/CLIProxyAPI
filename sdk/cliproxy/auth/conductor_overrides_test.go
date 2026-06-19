@@ -1203,3 +1203,154 @@ func TestManager_StaticFileNotFoundStopsRetryWithoutSuspendingAuth(t *testing.T)
 		t.Fatalf("expected static-file not-found to avoid bad auth model cooldown state, got %#v", state)
 	}
 }
+
+func TestManager_Execute_OpenAICompat402FallsBackAndRemembersExhaustedKey(t *testing.T) {
+	model := "gpt-oss-120b"
+	provider := "kimi.com"
+	paymentErr := &Error{
+		HTTPStatus: http.StatusPaymentRequired,
+		Message:    `{"error":{"message":"Insufficient quota.","type":"insufficient_quota"}}`,
+	}
+
+	m := NewManager(nil, nil, nil)
+	executor := &authFallbackExecutor{
+		id:            provider,
+		executeErrors: map[string]error{},
+	}
+	m.RegisterExecutor(executor)
+
+	badAuth := &Auth{
+		ID:       "aa-bad-key",
+		Provider: provider,
+		Attributes: map[string]string{
+			"api_key":      "exhausted-key",
+			"compat_name":  "kimi",
+			"provider_key": provider,
+			"source":       "config:kimi.com[bad]",
+		},
+		Metadata: map[string]any{"disable_cooling": true},
+	}
+	goodAuth := &Auth{
+		ID:       "bb-good-key",
+		Provider: provider,
+		Attributes: map[string]string{
+			"api_key":      "good-key",
+			"compat_name":  "kimi",
+			"provider_key": provider,
+			"source":       "config:kimi.com[good]",
+		},
+		Metadata: map[string]any{"disable_cooling": true},
+	}
+	executor.executeErrors[badAuth.ID] = paymentErr
+
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(badAuth.ID, provider, []*registry.ModelInfo{{ID: model}})
+	reg.RegisterClient(goodAuth.ID, provider, []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() {
+		reg.UnregisterClient(badAuth.ID)
+		reg.UnregisterClient(goodAuth.ID)
+	})
+
+	if _, errRegister := m.Register(context.Background(), badAuth); errRegister != nil {
+		t.Fatalf("register bad auth: %v", errRegister)
+	}
+	if _, errRegister := m.Register(context.Background(), goodAuth); errRegister != nil {
+		t.Fatalf("register good auth: %v", errRegister)
+	}
+
+	request := cliproxyexecutor.Request{Model: model}
+	resp, errExecute := m.Execute(context.Background(), []string{provider}, request, cliproxyexecutor.Options{})
+	if errExecute != nil {
+		t.Fatalf("execute error = %v, want success via fallback key", errExecute)
+	}
+	if string(resp.Payload) != goodAuth.ID {
+		t.Fatalf("payload = %q, want %q", string(resp.Payload), goodAuth.ID)
+	}
+
+	gotCalls := executor.ExecuteCalls()
+	wantCalls := []string{badAuth.ID, goodAuth.ID}
+	if len(gotCalls) != len(wantCalls) {
+		t.Fatalf("execute calls = %v, want %v", gotCalls, wantCalls)
+	}
+	for i := range wantCalls {
+		if gotCalls[i] != wantCalls[i] {
+			t.Fatalf("execute call %d auth = %q, want %q", i, gotCalls[i], wantCalls[i])
+		}
+	}
+
+	updatedBad, ok := m.GetByID(badAuth.ID)
+	if !ok || updatedBad == nil {
+		t.Fatalf("expected bad auth to remain registered")
+	}
+	state := updatedBad.ModelStates[model]
+	if state == nil {
+		t.Fatalf("expected model state for %q", model)
+	}
+	if state.NextRetryAfter.IsZero() {
+		t.Fatalf("expected bad key to be remembered with cooldown, got zero NextRetryAfter")
+	}
+	if !state.NextRetryAfter.After(time.Now().Add(apiKeyPaymentExhaustedCooldown / 2)) {
+		t.Fatalf("expected long-lived cooldown, got %v", state.NextRetryAfter)
+	}
+
+	executor.mu.Lock()
+	executor.executeCalls = nil
+	executor.mu.Unlock()
+
+	resp2, errExecute2 := m.Execute(context.Background(), []string{provider}, request, cliproxyexecutor.Options{})
+	if errExecute2 != nil {
+		t.Fatalf("second execute error = %v, want success without retrying bad key", errExecute2)
+	}
+	if string(resp2.Payload) != goodAuth.ID {
+		t.Fatalf("second payload = %q, want %q", string(resp2.Payload), goodAuth.ID)
+	}
+	gotCalls2 := executor.ExecuteCalls()
+	if len(gotCalls2) != 1 || gotCalls2[0] != goodAuth.ID {
+		t.Fatalf("second execute calls = %v, want only good auth %q", gotCalls2, goodAuth.ID)
+	}
+}
+
+func TestManager_MarkResult_APIKey402UsesLongLivedCooldownWithDisableCooling(t *testing.T) {
+	m := NewManager(nil, nil, nil)
+	auth := &Auth{
+		ID:       "codex:apikey:abc",
+		Provider: "codex",
+		Attributes: map[string]string{
+			"api_key": "secret",
+			"source":  "config:codex[abc]",
+		},
+		Metadata: map[string]any{"disable_cooling": true},
+	}
+	if _, errRegister := m.Register(context.Background(), auth); errRegister != nil {
+		t.Fatalf("register auth: %v", errRegister)
+	}
+
+	model := "gpt-5"
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(auth.ID, "codex", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() { reg.UnregisterClient(auth.ID) })
+
+	m.MarkResult(context.Background(), Result{
+		AuthID:   auth.ID,
+		Provider: "codex",
+		Model:    model,
+		Success:  false,
+		Error:    &Error{HTTPStatus: http.StatusPaymentRequired, Message: "insufficient_quota"},
+	})
+
+	updated, ok := m.GetByID(auth.ID)
+	if !ok || updated == nil {
+		t.Fatalf("expected auth to be present")
+	}
+	state := updated.ModelStates[model]
+	if state == nil {
+		t.Fatalf("expected model state")
+	}
+	if state.NextRetryAfter.IsZero() {
+		t.Fatalf("expected 402 on api key to set cooldown even with disable_cooling")
+	}
+	blocked, _, _ := isAuthBlockedForModel(updated, model, time.Now())
+	if !blocked {
+		t.Fatalf("expected exhausted api key to be blocked for model")
+	}
+}

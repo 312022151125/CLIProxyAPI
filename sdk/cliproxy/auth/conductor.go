@@ -3832,13 +3832,6 @@ func isRequestScopedNotFoundResultError(err *Error) bool {
 // failures where switching auths or pooled upstream models will not help.
 // Model-support errors are excluded so routing can fall through to another auth
 // or upstream.
-// isRequestInvalidError returns true if the error represents a client request
-// error that should not be retried. Specifically, it treats 400 responses with
-// "invalid_request_error", request-scoped 404 item misses caused by `store=false`,
-// all 422 responses, and context-window errors (any HTTP status) as request-shape
-// failures where switching auths or pooled upstream models will not help.
-// Model-support errors are excluded so routing can fall through to another auth
-// or upstream.
 func isRequestInvalidError(err error) bool {
 	if err == nil {
 		return false
@@ -3880,6 +3873,7 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 		return
 	}
 	if isRequestScopedNotFoundResultError(resultErr) || isStaticFileNotFoundResultError(resultErr) {
+		return
 	}
 	auth.Unavailable = true
 	auth.Status = StatusError

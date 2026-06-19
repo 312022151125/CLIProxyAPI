@@ -49,11 +49,17 @@ func DetectUpstreamErrorBody(httpStatus int, body []byte) *UpstreamBodyError {
 	if len(body) == 0 {
 		return nil
 	}
-	trimmed := strings.TrimSpace(string(body))
-	if len(trimmed) == 0 || (trimmed[0] != '{' && trimmed[0] != '[') {
+	var firstByte byte
+	for _, b := range body {
+		if b != ' ' && b != '\t' && b != '\n' && b != '\r' {
+			firstByte = b
+			break
+		}
+	}
+	if firstByte != '{' && firstByte != '[' {
 		return nil
 	}
-	errField := gjson.Get(trimmed, "error")
+	errField := gjson.GetBytes(body, "error")
 	if !errField.Exists() {
 		return nil
 	}

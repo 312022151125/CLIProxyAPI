@@ -1183,6 +1183,9 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 	if errMsg != nil {
 		if fallbackModel := maybeFallbackClaudeOpusModel(modelName); fallbackModel != "" {
 			dataChan, headers, errChan := h.executeStreamWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
+			if dataChan == nil {
+				return nil, headers, errChan
+			}
 			wrapped := make(chan []byte)
 			go func(displayModel string) {
 				defer close(wrapped)
@@ -1238,6 +1241,9 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 	if err != nil {
 		if fallbackModel := maybeFallbackClaudeOpusModel(modelName); fallbackModel != "" {
 			dataChan, headers, errChan := h.executeStreamWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
+			if dataChan == nil {
+				return nil, headers, errChan
+			}
 			wrapped := make(chan []byte)
 			go func(displayModel string) {
 				defer close(wrapped)

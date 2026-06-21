@@ -9,14 +9,14 @@ func TestMaybeFallbackClaudeOpusModel(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"claude-opus-4-8", "claude-opus-4-6"},
+		{"claude-opus-4-8", "claude-opus-4-7"},
 		{"claude-opus-4-7", "claude-opus-4-6"},
 		{"claude-opus-4-6", ""},
-		{"claude-opus-4-8(high)", "claude-opus-4-6(high)"},
+		{"claude-opus-4-8(high)", "claude-opus-4-7(high)"},
 		{"claude-opus-4-7(16384)", "claude-opus-4-6(16384)"},
 		{"gpt-5.5", ""},
 		{"claude-sonnet-4-5", ""},
-		{"claude-opus-4-8-20250801", "claude-opus-4-6"},
+		{"claude-opus-4-8-20250801", "claude-opus-4-7"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -25,6 +25,37 @@ func TestMaybeFallbackClaudeOpusModel(t *testing.T) {
 				t.Errorf("maybeFallbackClaudeOpusModel(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestMaybeFallbackGLMModel(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"glm-5.2", "glm-5.1"},
+		{"glm-5.1", "glm-5"},
+		{"glm-5", ""},
+		{"glm-5.2(high)", "glm-5.1(high)"},
+		{"glm-5.1(8192)", "glm-5(8192)"},
+		{"claude-opus-4-8", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := maybeFallbackGLMModel(tt.input)
+			if got != tt.expected {
+				t.Errorf("maybeFallbackGLMModel(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMaybeFallbackModel(t *testing.T) {
+	if got := maybeFallbackModel("claude-opus-4-8"); got != "claude-opus-4-7" {
+		t.Fatalf("opus via maybeFallbackModel = %q", got)
+	}
+	if got := maybeFallbackModel("glm-5.2"); got != "glm-5.1" {
+		t.Fatalf("glm via maybeFallbackModel = %q", got)
 	}
 }
 

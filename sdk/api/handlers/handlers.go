@@ -707,21 +707,6 @@ func (h *BaseAPIHandler) executeWithAuthManager(ctx context.Context, handlerType
 	return h.executeWithAuthManagerFormats(ctx, handlerType, handlerType, modelName, rawJSON, alt, allowImageModel, modelExecutionOptions{})
 }
 
-// maybeFallbackClaudeOpusModel returns a fallback model name if the requested model
-// is a known claude-opus-4-8 or claude-opus-4-7 variant that should fall back to
-// claude-opus-4-6 when unavailable. The thinking suffix is preserved when present.
-func maybeFallbackClaudeOpusModel(model string) string {
-	parsed := thinking.ParseSuffix(model)
-	base := parsed.ModelName
-	if !strings.HasPrefix(base, "claude-opus-4-8") && !strings.HasPrefix(base, "claude-opus-4-7") {
-		return ""
-	}
-	if parsed.HasSuffix {
-		return "claude-opus-4-6(" + parsed.RawSuffix + ")"
-	}
-	return "claude-opus-4-6"
-}
-
 // withFallbackModelInPayload updates the "model" field in the raw JSON payload
 // when a fallback model is selected. If the payload is empty or does not contain
 // a "model" field, the original payload is returned unchanged.
@@ -780,7 +765,7 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entr
 	}
 	providers, normalizedModel, errMsg := h.providersForExecution(modelName, originalRequestedModel, allowImageModel, routeDecision)
 	if errMsg != nil {
-		if fallbackModel := maybeFallbackClaudeOpusModel(modelName); fallbackModel != "" {
+		if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
 			body, headers, err := h.executeWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
 			if err == nil {
 				body = restoreOriginalModelInBody(body, originalRequestedModel)
@@ -817,7 +802,7 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entr
 	req, opts = h.applyRequestInterceptorsBeforeAuth(ctx, entryProtocol, originalRequestedModel, req, opts, execOptions.SkipInterceptorPluginID)
 	resp, err := h.AuthManager.Execute(ctx, providers, req, opts)
 	if err != nil {
-		if fallbackModel := maybeFallbackClaudeOpusModel(modelName); fallbackModel != "" {
+		if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
 			body, headers, err := h.executeWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
 			if err == nil {
 				body = restoreOriginalModelInBody(body, originalRequestedModel)
@@ -1181,7 +1166,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 	}
 	providers, normalizedModel, errMsg := h.providersForExecution(modelName, originalRequestedModel, allowImageModel, routeDecision)
 	if errMsg != nil {
-		if fallbackModel := maybeFallbackClaudeOpusModel(modelName); fallbackModel != "" {
+		if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
 			dataChan, headers, errChan := h.executeStreamWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
 			if dataChan == nil {
 				return nil, headers, errChan
@@ -1239,7 +1224,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 	req, opts = h.applyRequestInterceptorsBeforeAuth(ctx, entryProtocol, originalRequestedModel, req, opts, execOptions.SkipInterceptorPluginID)
 	streamResult, err := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
 	if err != nil {
-		if fallbackModel := maybeFallbackClaudeOpusModel(modelName); fallbackModel != "" {
+		if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
 			dataChan, headers, errChan := h.executeStreamWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
 			if dataChan == nil {
 				return nil, headers, errChan

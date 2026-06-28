@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -23,12 +24,13 @@ import (
 )
 
 const (
-	redisKeyConfig     = "config"
-	redisChannelConfig = "config"
-	redisKeyModels     = "models"
-	redisKeyUsage      = "usage"
-	redisKeyRequestLog = "request-log"
-	redisKeyAppLog     = "app-log"
+	redisKeyConfig       = "config"
+	redisChannelConfig   = "config"
+	redisKeyUsage        = "usage"
+	redisKeyRequestLog   = "request-log"
+	redisKeyAppLog       = "app-log"
+	redisKeyPluginStatus = "plugin-status"
+	redisKeyPluginTasks  = "plugin-tasks"
 
 	homeReconnectInterval          = time.Second
 	homeReconnectFailoverThreshold = 3
@@ -57,6 +59,16 @@ type clusterNode struct {
 type clusterNodesEnvelope struct {
 	OK    bool          `json:"ok"`
 	Nodes []clusterNode `json:"nodes"`
+}
+
+type PluginTask struct {
+	ID             uint      `json:"id"`
+	Operation      string    `json:"operation"`
+	PluginID       string    `json:"plugin_id"`
+	TargetNodeType string    `json:"target_node_type,omitempty"`
+	TargetNodeID   string    `json:"target_node_id,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type KVSetOptions struct {
@@ -520,12 +532,21 @@ func (c *Client) GetConfig(ctx context.Context) ([]byte, error) {
 	return raw, nil
 }
 
-func (c *Client) GetModels(ctx context.Context) ([]byte, error) {
+func (c *Client) GetModels(ctx context.Context, headers http.Header, query url.Values) ([]byte, error) {
 	cmd, errClient := c.commandClient()
 	if errClient != nil {
 		return nil, errClient
 	}
-	raw, err := cmd.Get(ctx, redisKeyModels).Bytes()
+	req := modelsRequest{
+		Type:    "models",
+		Headers: headersToLowerMap(headers),
+		Query:   queryToLowerMap(query),
+	}
+	keyBytes, err := json.Marshal(&req)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := cmd.Get(ctx, string(keyBytes)).Bytes()
 	if errors.Is(err, redis.Nil) {
 		return nil, ErrModelsNotFound
 	}
@@ -745,6 +766,32 @@ func headersToLowerMap(headers http.Header) map[string]string {
 	return out
 }
 
+func queryToLowerMap(query url.Values) map[string]string {
+	if len(query) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(query))
+	for key, values := range query {
+		k := strings.ToLower(strings.TrimSpace(key))
+		if k == "" {
+			continue
+		}
+		if len(values) == 0 {
+			out[k] = ""
+			continue
+		}
+		trimmed := make([]string, 0, len(values))
+		for _, v := range values {
+			trimmed = append(trimmed, strings.TrimSpace(v))
+		}
+		out[k] = strings.Join(trimmed, ", ")
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func newAuthDispatchRequest(requestedModel string, sessionID string, headers http.Header, count int) authDispatchRequest {
 	if count <= 0 {
 		count = 1
@@ -850,7 +897,40 @@ func (c *Client) RPushAppLog(ctx context.Context, payload []byte) error {
 	return cmd.RPush(ctx, redisKeyAppLog, payload).Err()
 }
 
-func (c *Client) handleSubscriptionPayload(channel string, payload string, onConfig func([]byte) error) error {
+func (c *Client) RPushPluginStatus(ctx context.Context, payload []byte) error {
+	cmd, errClient := c.commandClient()
+	if errClient != nil {
+		return errClient
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	return cmd.RPush(ctx, redisKeyPluginStatus, payload).Err()
+}
+
+func (c *Client) GetPluginTasks(ctx context.Context) ([]PluginTask, error) {
+	cmd, errClient := c.commandClient()
+	if errClient != nil {
+		return nil, errClient
+	}
+	raw, errGet := cmd.Get(ctx, redisKeyPluginTasks).Bytes()
+	if errors.Is(errGet, redis.Nil) {
+		return nil, nil
+	}
+	if errGet != nil {
+		return nil, errGet
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var tasks []PluginTask
+	if errUnmarshal := json.Unmarshal(raw, &tasks); errUnmarshal != nil {
+		return nil, errUnmarshal
+	}
+	return tasks, nil
+}
+
+func (c *Client) handleSubscriptionPayload(ctx context.Context, channel string, payload string, onConfig func([]byte) error) error {
 	payload = strings.TrimSpace(payload)
 	if payload == "" {
 		return nil
@@ -969,7 +1049,7 @@ func (c *Client) StartConfigSubscriber(ctx context.Context, onConfig func([]byte
 				if msg == nil {
 					continue
 				}
-				if errApply := c.handleSubscriptionPayload(msg.Channel, msg.Payload, onConfig); errApply != nil {
+				if errApply := c.handleSubscriptionPayload(ctx, msg.Channel, msg.Payload, onConfig); errApply != nil {
 					if strings.EqualFold(strings.TrimSpace(msg.Channel), redisChannelCluster) {
 						log.Warn("failed to apply cluster update from home control center, ignoring")
 					} else {

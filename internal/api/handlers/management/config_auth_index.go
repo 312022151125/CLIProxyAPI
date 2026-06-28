@@ -42,6 +42,7 @@ type openAICompatibilityWithAuthIndex struct {
 	APIKeyEntries        []openAICompatibilityAPIKeyWithAuthIndex `json:"api-key-entries,omitempty"`
 	Models               []config.OpenAICompatibilityModel        `json:"models,omitempty"`
 	Headers              map[string]string                        `json:"headers,omitempty"`
+	DisableCooling       bool                                     `json:"disable-cooling,omitempty"`
 	ResponsesPassthrough bool                                     `json:"responses-passthrough,omitempty"`
 	ResponsesWebsocket   bool                                     `json:"responses-websocket,omitempty"`
 	ResponsesCompaction  bool                                     `json:"responses-compaction,omitempty"`
@@ -224,6 +225,7 @@ func (h *Handler) openAICompatibilityWithAuthIndex() []openAICompatibilityWithAu
 			BaseURL:              entry.BaseURL,
 			Models:               entry.Models,
 			Headers:              entry.Headers,
+			DisableCooling:       entry.DisableCooling,
 			ResponsesPassthrough: entry.ResponsesPassthrough,
 			ResponsesWebsocket:   entry.ResponsesWebsocket,
 			ResponsesCompaction:  entry.ResponsesCompaction,

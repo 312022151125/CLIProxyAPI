@@ -3504,17 +3504,42 @@ func (m *Manager) shouldRetryAfterError(err error, attempt int, providers []stri
 		}
 		return wait, true
 	}
-	if status != http.StatusTooManyRequests {
+	// Quota, billing and rate-limit failures (429/402/403) are retryable across
+	// alternative credentials. 429 may carry a Retry-After hint; 402/403 typically
+	// do not, so fall back to an immediate retry to let auth selection rotate to
+	// another key. Transient upstream errors (5xx/408) are handled via the cooldown
+	// path above, since applyAuthFailureState already schedules a short cooldown.
+	if !isRetryableStatusCode(status) {
 		return 0, false
 	}
 	if !m.retryAllowed(attempt, providers) {
 		return 0, false
 	}
 	retryAfter := retryAfterFromError(err)
-	if retryAfter == nil || *retryAfter <= 0 || *retryAfter > maxWait {
-		return 0, false
+	if retryAfter != nil && *retryAfter > 0 {
+		if *retryAfter > maxWait {
+			return 0, false
+		}
+		return *retryAfter, true
 	}
-	return *retryAfter, true
+	// No Retry-After hint: retry immediately so the next attempt can select a
+	// different credential that may still have quota available.
+	return 0, true
+}
+
+// isRetryableStatusCode reports whether an upstream HTTP status code should
+// trigger an immediate retry across alternative credentials (subject to the
+// configured retry budget). Rate-limit (429), quota/billing (402) and
+// permission/quota (403) failures are included so an exhausted key can be
+// bypassed in favor of another credential.
+func isRetryableStatusCode(status int) bool {
+	switch status {
+	case http.StatusTooManyRequests,
+		http.StatusPaymentRequired,
+		http.StatusForbidden:
+		return true
+	}
+	return false
 }
 
 func waitForCooldown(ctx context.Context, wait time.Duration) error {
@@ -3578,7 +3603,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			}
 		} else {
 			if result.Model != "" {
-				if !isRequestScopedNotFoundResultError(result.Error) {
+				if !isRequestScopedNotFoundResultError(result.Error) && !isStaticFileNotFoundResultError(result.Error) {
 					disableCooling := m.cooldownDisabledForAuth(auth)
 					state := ensureModelState(auth, result.Model)
 					state.Unavailable = true
@@ -3621,7 +3646,21 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 								suspendReason = "unauthorized"
 								shouldSuspendModel = true
 							}
-						case 402, 403:
+						case http.StatusPaymentRequired:
+							if shouldApplyAPIKeyPaymentExhaustedCooldown(auth, statusCode) {
+								applyAPIKeyPaymentExhaustedCooldown(auth, state, result.Error, now)
+								suspendReason = "payment_required"
+								shouldSuspendModel = true
+								setModelQuota = true
+							} else if disableCooling {
+								state.NextRetryAfter = time.Time{}
+							} else {
+								next := now.Add(30 * time.Minute)
+								state.NextRetryAfter = next
+								suspendReason = "payment_required"
+								shouldSuspendModel = true
+							}
+						case http.StatusForbidden:
 							if disableCooling {
 								state.NextRetryAfter = time.Time{}
 							} else {
@@ -4079,6 +4118,21 @@ func isRequestScopedNotFoundMessage(message string) bool {
 		strings.Contains(lower, "items are not persisted when `store` is set to false")
 }
 
+func isStaticFileNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, `"code":"not-found"`) && strings.Contains(msg, "failed to read static file")
+}
+
+func isStaticFileNotFoundResultError(err *Error) bool {
+	if err == nil {
+		return false
+	}
+	return isStaticFileNotFoundError(err)
+}
+
 func isRequestScopedNotFoundResultError(err *Error) bool {
 	if err == nil || statusCodeFromResult(err) != http.StatusNotFound {
 		return false
@@ -4106,6 +4160,9 @@ func isRequestInvalidError(err error) bool {
 	if isContextWindowExceededError(err) {
 		return true
 	}
+	if isStaticFileNotFoundError(err) {
+		return true
+	}
 	status := statusCodeFromError(err)
 	switch status {
 	case http.StatusBadRequest:
@@ -4126,11 +4183,56 @@ func isRequestInvalidError(err error) bool {
 	}
 }
 
+// apiKeyPaymentExhaustedCooldown keeps config-sourced API keys out of rotation after HTTP 402.
+const apiKeyPaymentExhaustedCooldown = 10 * 365 * 24 * time.Hour
+
+func shouldApplyAPIKeyPaymentExhaustedCooldown(auth *Auth, statusCode int) bool {
+	if auth == nil || statusCode != http.StatusPaymentRequired {
+		return false
+	}
+	return isAPIKeyAuth(auth)
+}
+
+func applyAPIKeyPaymentExhaustedCooldown(auth *Auth, state *ModelState, resultErr *Error, now time.Time) {
+	if auth == nil {
+		return
+	}
+	next := now.Add(apiKeyPaymentExhaustedCooldown)
+	message := "payment_required"
+	if resultErr != nil && strings.TrimSpace(resultErr.Message) != "" {
+		message = strings.TrimSpace(resultErr.Message)
+	}
+	quota := QuotaState{
+		Exceeded:      true,
+		Reason:        "payment_required",
+		NextRecoverAt: next,
+	}
+	auth.Unavailable = true
+	auth.Status = StatusError
+	auth.NextRetryAfter = next
+	auth.StatusMessage = message
+	auth.Quota = quota
+	auth.UpdatedAt = now
+	if resultErr != nil {
+		auth.LastError = cloneError(resultErr)
+	}
+	if state != nil {
+		state.Unavailable = true
+		state.Status = StatusError
+		state.NextRetryAfter = next
+		state.StatusMessage = message
+		state.Quota = quota
+		state.UpdatedAt = now
+		if resultErr != nil {
+			state.LastError = cloneError(resultErr)
+		}
+	}
+}
 func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Duration, now time.Time, disableCooling bool) {
 	if auth == nil {
 		return
 	}
-	if isRequestScopedNotFoundResultError(resultErr) {
+	if isRequestScopedNotFoundResultError(resultErr) || isStaticFileNotFoundResultError(resultErr) {
 		return
 	}
 	auth.Unavailable = true
@@ -4163,7 +4265,18 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 		} else {
 			auth.NextRetryAfter = now.Add(30 * time.Minute)
 		}
-	case 402, 403:
+	case http.StatusPaymentRequired:
+		if shouldApplyAPIKeyPaymentExhaustedCooldown(auth, statusCode) {
+			applyAPIKeyPaymentExhaustedCooldown(auth, nil, resultErr, now)
+			return
+		}
+		auth.StatusMessage = "payment_required"
+		if disableCooling {
+			auth.NextRetryAfter = time.Time{}
+		} else {
+			auth.NextRetryAfter = now.Add(30 * time.Minute)
+		}
+	case http.StatusForbidden:
 		auth.StatusMessage = "payment_required"
 		if disableCooling {
 			auth.NextRetryAfter = time.Time{}

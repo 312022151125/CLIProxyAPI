@@ -765,12 +765,14 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entr
 	}
 	providers, normalizedModel, errMsg := h.providersForExecution(modelName, originalRequestedModel, allowImageModel, routeDecision)
 	if errMsg != nil {
-		if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
-			body, headers, err := h.executeWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
-			if err == nil {
-				body = restoreOriginalModelInBody(body, originalRequestedModel)
+		if shouldAttemptRoutingModelVersionFallback(errMsg) {
+			if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
+				body, headers, err := h.executeWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
+				if err == nil {
+					body = restoreOriginalModelInBody(body, originalRequestedModel)
+				}
+				return body, headers, err
 			}
-			return body, headers, err
 		}
 		return nil, nil, errMsg
 	}
@@ -802,12 +804,14 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entr
 	req, opts = h.applyRequestInterceptorsBeforeAuth(ctx, entryProtocol, originalRequestedModel, req, opts, execOptions.SkipInterceptorPluginID)
 	resp, err := h.AuthManager.Execute(ctx, providers, req, opts)
 	if err != nil {
-		if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
-			body, headers, err := h.executeWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
-			if err == nil {
-				body = restoreOriginalModelInBody(body, originalRequestedModel)
+		if shouldAttemptModelVersionFallback(err) {
+			if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
+				body, headers, err := h.executeWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
+				if err == nil {
+					body = restoreOriginalModelInBody(body, originalRequestedModel)
+				}
+				return body, headers, err
 			}
-			return body, headers, err
 		}
 		err = enrichAuthSelectionError(err, providers, normalizedModel)
 		status := http.StatusInternalServerError
@@ -845,6 +849,15 @@ func (h *BaseAPIHandler) executeCountWithAuthManager(ctx context.Context, handle
 	}
 	providers, normalizedModel, errMsg := h.providersForExecution(modelName, originalRequestedModel, false, routeDecision)
 	if errMsg != nil {
+		if shouldAttemptRoutingModelVersionFallback(errMsg) {
+			if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
+				body, headers, err := h.executeCountWithAuthManager(ctx, handlerType, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, execOptions)
+				if err == nil {
+					body = restoreOriginalModelInBody(body, originalRequestedModel)
+				}
+				return body, headers, err
+			}
+		}
 		return nil, nil, errMsg
 	}
 	reqMeta := requestExecutionMetadata(ctx)
@@ -873,8 +886,17 @@ func (h *BaseAPIHandler) executeCountWithAuthManager(ctx context.Context, handle
 	req, opts = h.applyRequestInterceptorsBeforeAuth(ctx, handlerType, originalRequestedModel, req, opts, execOptions.SkipInterceptorPluginID)
 	resp, err := h.AuthManager.ExecuteCount(ctx, providers, req, opts)
 	if err != nil {
-		err = enrichAuthSelectionError(err, providers, normalizedModel)
+		if shouldAttemptModelVersionFallback(err) {
+			if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
+				body, headers, err := h.executeCountWithAuthManager(ctx, handlerType, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, execOptions)
+				if err == nil {
+					body = restoreOriginalModelInBody(body, originalRequestedModel)
+				}
+				return body, headers, err
+			}
+		}
 		status := http.StatusInternalServerError
+		err = enrichAuthSelectionError(err, providers, normalizedModel)
 		if se, ok := err.(interface{ StatusCode() int }); ok && se != nil {
 			if code := se.StatusCode(); code > 0 {
 				status = code
@@ -1166,30 +1188,32 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 	}
 	providers, normalizedModel, errMsg := h.providersForExecution(modelName, originalRequestedModel, allowImageModel, routeDecision)
 	if errMsg != nil {
-		if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
-			dataChan, headers, errChan := h.executeStreamWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
-			if dataChan == nil {
-				return nil, headers, errChan
-			}
-			wrapped := make(chan []byte)
-			go func(displayModel string) {
-				defer close(wrapped)
-				for chunk := range dataChan {
-					if len(chunk) > 0 {
-						chunk = restoreOriginalModelInChunk(chunk, displayModel)
-					}
-					if ctx == nil {
-						wrapped <- chunk
-						continue
-					}
-					select {
-					case <-ctx.Done():
-						return
-					case wrapped <- chunk:
-					}
+		if shouldAttemptRoutingModelVersionFallback(errMsg) {
+			if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
+				dataChan, headers, errChan := h.executeStreamWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
+				if dataChan == nil {
+					return nil, headers, errChan
 				}
-			}(originalRequestedModel)
-			return wrapped, headers, errChan
+				wrapped := make(chan []byte)
+				go func(displayModel string) {
+					defer close(wrapped)
+					for chunk := range dataChan {
+						if len(chunk) > 0 {
+							chunk = restoreOriginalModelInChunk(chunk, displayModel)
+						}
+						if ctx == nil {
+							wrapped <- chunk
+							continue
+						}
+						select {
+						case <-ctx.Done():
+							return
+						case wrapped <- chunk:
+						}
+					}
+				}(originalRequestedModel)
+				return wrapped, headers, errChan
+			}
 		}
 		errChan := make(chan *interfaces.ErrorMessage, 1)
 		errChan <- errMsg
@@ -1224,30 +1248,32 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 	req, opts = h.applyRequestInterceptorsBeforeAuth(ctx, entryProtocol, originalRequestedModel, req, opts, execOptions.SkipInterceptorPluginID)
 	streamResult, err := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
 	if err != nil {
-		if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
-			dataChan, headers, errChan := h.executeStreamWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
-			if dataChan == nil {
-				return nil, headers, errChan
-			}
-			wrapped := make(chan []byte)
-			go func(displayModel string) {
-				defer close(wrapped)
-				for chunk := range dataChan {
-					if len(chunk) > 0 {
-						chunk = restoreOriginalModelInChunk(chunk, displayModel)
-					}
-					if ctx == nil {
-						wrapped <- chunk
-						continue
-					}
-					select {
-					case <-ctx.Done():
-						return
-					case wrapped <- chunk:
-					}
+		if shouldAttemptModelVersionFallback(err) {
+			if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
+				dataChan, headers, errChan := h.executeStreamWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
+				if dataChan == nil {
+					return nil, headers, errChan
 				}
-			}(originalRequestedModel)
-			return wrapped, headers, errChan
+				wrapped := make(chan []byte)
+				go func(displayModel string) {
+					defer close(wrapped)
+					for chunk := range dataChan {
+						if len(chunk) > 0 {
+							chunk = restoreOriginalModelInChunk(chunk, displayModel)
+						}
+						if ctx == nil {
+							wrapped <- chunk
+							continue
+						}
+						select {
+						case <-ctx.Done():
+							return
+						case wrapped <- chunk:
+						}
+					}
+				}(originalRequestedModel)
+				return wrapped, headers, errChan
+			}
 		}
 		err = enrichAuthSelectionError(err, providers, normalizedModel)
 		errChan := make(chan *interfaces.ErrorMessage, 1)

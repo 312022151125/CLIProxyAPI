@@ -6,45 +6,32 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
 )
 
+// modelVersionFallbackRule: first matching prefix wins; Next is one hop only.
+type modelVersionFallbackRule struct {
+	Prefix string // matched against thinking.ParseSuffix(model).ModelName via strings.HasPrefix
+	Next   string // next base model id (no suffix); suffix re-applied by helper
+}
+
+var modelVersionFallbackRules = []modelVersionFallbackRule{
+	{Prefix: "claude-opus-4-8", Next: "claude-opus-4-7"},
+	{Prefix: "claude-opus-4-7", Next: "claude-opus-4-6"},
+	{Prefix: "claude-sonnet-4-6", Next: "claude-sonnet-4-5"},
+	{Prefix: "glm-5.2", Next: "glm-5.1"},
+	{Prefix: "glm-5.1", Next: "glm-5"},
+	{Prefix: "kimi-k2.6", Next: "kimi-k2.5"},
+}
+
 // maybeFallbackModel returns the next model to try when the requested model is unavailable.
 // Thinking suffixes are preserved when present.
 func maybeFallbackModel(model string) string {
-	if fb := maybeFallbackClaudeOpusModel(model); fb != "" {
-		return fb
-	}
-	return maybeFallbackGLMModel(model)
-}
-
-// maybeFallbackClaudeOpusModel degrades claude-opus-4-8 -> claude-opus-4-7 -> claude-opus-4-6 when unavailable.
-func maybeFallbackClaudeOpusModel(model string) string {
 	parsed := thinking.ParseSuffix(model)
 	base := parsed.ModelName
-	var next string
-	switch {
-	case strings.HasPrefix(base, "claude-opus-4-8"):
-		next = "claude-opus-4-7"
-	case strings.HasPrefix(base, "claude-opus-4-7"):
-		next = "claude-opus-4-6"
-	default:
-		return ""
+	for _, rule := range modelVersionFallbackRules {
+		if strings.HasPrefix(base, rule.Prefix) {
+			return withThinkingSuffix(rule.Next, parsed)
+		}
 	}
-	return withThinkingSuffix(next, parsed)
-}
-
-// maybeFallbackGLMModel degrades glm-5.2 -> glm-5.1 -> glm-5 when unavailable.
-func maybeFallbackGLMModel(model string) string {
-	parsed := thinking.ParseSuffix(model)
-	base := parsed.ModelName
-	var next string
-	switch {
-	case strings.HasPrefix(base, "glm-5.2"):
-		next = "glm-5.1"
-	case strings.HasPrefix(base, "glm-5.1"):
-		next = "glm-5"
-	default:
-		return ""
-	}
-	return withThinkingSuffix(next, parsed)
+	return ""
 }
 
 func withThinkingSuffix(model string, parsed thinking.SuffixResult) string {

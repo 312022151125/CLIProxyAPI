@@ -4,58 +4,34 @@ import (
 	"testing"
 )
 
-func TestMaybeFallbackClaudeOpusModel(t *testing.T) {
+func TestMaybeFallbackModel(t *testing.T) {
 	tests := []struct {
-		input    string
-		expected string
+		in   string
+		want string
 	}{
 		{"claude-opus-4-8", "claude-opus-4-7"},
 		{"claude-opus-4-7", "claude-opus-4-6"},
 		{"claude-opus-4-6", ""},
 		{"claude-opus-4-8(high)", "claude-opus-4-7(high)"},
 		{"claude-opus-4-7(16384)", "claude-opus-4-6(16384)"},
-		{"gpt-5.5", ""},
-		{"claude-sonnet-4-5", ""},
 		{"claude-opus-4-8-20250801", "claude-opus-4-7"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := maybeFallbackClaudeOpusModel(tt.input)
-			if got != tt.expected {
-				t.Errorf("maybeFallbackClaudeOpusModel(%q) = %q, want %q", tt.input, got, tt.expected)
-			}
-		})
-	}
-}
-
-func TestMaybeFallbackGLMModel(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
+		{"claude-sonnet-4-6", "claude-sonnet-4-5"},
+		{"claude-sonnet-4-6(high)", "claude-sonnet-4-5(high)"},
+		{"claude-sonnet-4-5", ""},
 		{"glm-5.2", "glm-5.1"},
 		{"glm-5.1", "glm-5"},
 		{"glm-5", ""},
-		{"glm-5.2(high)", "glm-5.1(high)"},
-		{"glm-5.1(8192)", "glm-5(8192)"},
-		{"claude-opus-4-8", ""},
+		{"kimi-k2.6", "kimi-k2.5"},
+		{"kimi-k2.6(8192)", "kimi-k2.5(8192)"},
+		{"kimi-k2.5", ""},
+		{"gpt-5.5", ""},
 	}
 	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := maybeFallbackGLMModel(tt.input)
-			if got != tt.expected {
-				t.Errorf("maybeFallbackGLMModel(%q) = %q, want %q", tt.input, got, tt.expected)
+		t.Run(tt.in, func(t *testing.T) {
+			if got := maybeFallbackModel(tt.in); got != tt.want {
+				t.Fatalf("maybeFallbackModel(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
-	}
-}
-
-func TestMaybeFallbackModel(t *testing.T) {
-	if got := maybeFallbackModel("claude-opus-4-8"); got != "claude-opus-4-7" {
-		t.Fatalf("opus via maybeFallbackModel = %q", got)
-	}
-	if got := maybeFallbackModel("glm-5.2"); got != "glm-5.1" {
-		t.Fatalf("glm via maybeFallbackModel = %q", got)
 	}
 }
 
@@ -64,73 +40,68 @@ func TestWithFallbackModelInPayload(t *testing.T) {
 		name          string
 		rawJSON       []byte
 		fallbackModel string
-		expected      string
+		want          string
 	}{
 		{
-			name:          "empty payload",
-			rawJSON:       []byte{},
-			fallbackModel: "claude-opus-4-6",
-			expected:      "",
-		},
-		{
-			name:          "no model field",
-			rawJSON:       []byte(`{"messages":[]}`),
-			fallbackModel: "claude-opus-4-6",
-			expected:      `{"messages":[]}`,
-		},
-		{
-			name:          "replace model",
+			name:          "updates model field",
 			rawJSON:       []byte(`{"model":"claude-opus-4-8","messages":[]}`),
-			fallbackModel: "claude-opus-4-6",
-			expected:      `{"model":"claude-opus-4-6","messages":[]}`,
+			fallbackModel: "claude-opus-4-7",
+			want:          `{"model":"claude-opus-4-7","messages":[]}`,
+		},
+		{
+			name:          "empty payload unchanged",
+			rawJSON:       nil,
+			fallbackModel: "claude-opus-4-7",
+			want:          "",
+		},
+		{
+			name:          "no model field unchanged",
+			rawJSON:       []byte(`{"messages":[]}`),
+			fallbackModel: "claude-opus-4-7",
+			want:          `{"messages":[]}`,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := withFallbackModelInPayload(tt.rawJSON, tt.fallbackModel)
-			if string(got) != tt.expected {
-				t.Errorf("withFallbackModelInPayload() = %s, want %s", got, tt.expected)
+			got := string(withFallbackModelInPayload(tt.rawJSON, tt.fallbackModel))
+			if got != tt.want {
+				t.Fatalf("withFallbackModelInPayload() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
+
 func TestRestoreOriginalModelInBody(t *testing.T) {
 	tests := []struct {
 		name          string
 		body          []byte
 		originalModel string
-		expected      string
+		want          string
 	}{
 		{
-			name:          "empty body",
-			body:          []byte{},
+			name:          "overwrites model",
+			body:          []byte(`{"model":"claude-opus-4-7","id":"chatcmpl-1"}`),
 			originalModel: "claude-opus-4-8",
-			expected:      "",
+			want:          `{"model":"claude-opus-4-8","id":"chatcmpl-1"}`,
 		},
 		{
-			name:          "no model field",
-			body:          []byte(`{"id":"123"}`),
+			name:          "empty body unchanged",
+			body:          nil,
 			originalModel: "claude-opus-4-8",
-			expected:      `{"id":"123"}`,
+			want:          "",
 		},
 		{
-			name:          "replace model",
-			body:          []byte(`{"model":"claude-opus-4-6","id":"123"}`),
+			name:          "no model field unchanged",
+			body:          []byte(`{"id":"chatcmpl-1"}`),
 			originalModel: "claude-opus-4-8",
-			expected:      `{"model":"claude-opus-4-8","id":"123"}`,
-		},
-		{
-			name:          "empty original model",
-			body:          []byte(`{"model":"claude-opus-4-6"}`),
-			originalModel: "",
-			expected:      `{"model":"claude-opus-4-6"}`,
+			want:          `{"id":"chatcmpl-1"}`,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := restoreOriginalModelInBody(tt.body, tt.originalModel)
-			if string(got) != tt.expected {
-				t.Errorf("restoreOriginalModelInBody() = %s, want %s", got, tt.expected)
+			got := string(restoreOriginalModelInBody(tt.body, tt.originalModel))
+			if got != tt.want {
+				t.Fatalf("restoreOriginalModelInBody() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -141,44 +112,32 @@ func TestRestoreOriginalModelInChunk(t *testing.T) {
 		name          string
 		chunk         []byte
 		originalModel string
-		expected      string
+		want          string
 	}{
 		{
-			name:          "empty chunk",
-			chunk:         []byte{},
+			name:          "sse data json",
+			chunk:         []byte("data: {\"model\":\"claude-opus-4-7\",\"choices\":[]}\n\n"),
 			originalModel: "claude-opus-4-8",
-			expected:      "",
+			want:          "data: {\"model\":\"claude-opus-4-8\",\"choices\":[]}\n\n",
 		},
 		{
-			name:          "no model field",
-			chunk:         []byte(`{"choices":[]}`),
+			name:          "raw json chunk",
+			chunk:         []byte(`{"model":"kimi-k2.5"}`),
+			originalModel: "kimi-k2.6",
+			want:          `{"model":"kimi-k2.6"}`,
+		},
+		{
+			name:          "empty chunk unchanged",
+			chunk:         nil,
 			originalModel: "claude-opus-4-8",
-			expected:      `{"choices":[]}`,
-		},
-		{
-			name:          "replace model",
-			chunk:         []byte(`{"model":"claude-opus-4-6","choices":[]}`),
-			originalModel: "claude-opus-4-8",
-			expected:      `{"model":"claude-opus-4-8","choices":[]}`,
-		},
-		{
-			name:          "with thinking suffix",
-			chunk:         []byte(`{"model":"claude-opus-4-6(high)"}`),
-			originalModel: "claude-opus-4-8(high)",
-			expected:      `{"model":"claude-opus-4-8(high)"}`,
-		},
-		{
-			name:          "empty original model",
-			chunk:         []byte(`{"model":"claude-opus-4-6"}`),
-			originalModel: "",
-			expected:      `{"model":"claude-opus-4-6"}`,
+			want:          "",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := restoreOriginalModelInChunk(tt.chunk, tt.originalModel)
-			if string(got) != tt.expected {
-				t.Errorf("restoreOriginalModelInChunk() = %s, want %s", got, tt.expected)
+			got := string(restoreOriginalModelInChunk(tt.chunk, tt.originalModel))
+			if got != tt.want {
+				t.Fatalf("restoreOriginalModelInChunk() = %q, want %q", got, tt.want)
 			}
 		})
 	}

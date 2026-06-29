@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
@@ -1206,7 +1207,7 @@ func TestManager_StaticFileNotFoundStopsRetryWithoutSuspendingAuth(t *testing.T)
 
 func TestManager_Execute_OpenAICompat402FallsBackAndRemembersExhaustedKey(t *testing.T) {
 	model := "gpt-oss-120b"
-	provider := "kimi.com"
+	provider := util.OpenAICompatibleProviderKey("kimi")
 	paymentErr := &Error{
 		HTTPStatus: http.StatusPaymentRequired,
 		Message:    `{"error":{"message":"Insufficient quota.","type":"insufficient_quota"}}`,
@@ -1225,7 +1226,7 @@ func TestManager_Execute_OpenAICompat402FallsBackAndRemembersExhaustedKey(t *tes
 		Attributes: map[string]string{
 			"api_key":      "exhausted-key",
 			"compat_name":  "kimi",
-			"provider_key": provider,
+			"provider_key": "kimi",
 			"source":       "config:kimi.com[bad]",
 		},
 		Metadata: map[string]any{"disable_cooling": true},
@@ -1236,7 +1237,7 @@ func TestManager_Execute_OpenAICompat402FallsBackAndRemembersExhaustedKey(t *tes
 		Attributes: map[string]string{
 			"api_key":      "good-key",
 			"compat_name":  "kimi",
-			"provider_key": provider,
+			"provider_key": "kimi",
 			"source":       "config:kimi.com[good]",
 		},
 		Metadata: map[string]any{"disable_cooling": true},

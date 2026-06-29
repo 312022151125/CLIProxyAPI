@@ -4034,6 +4034,11 @@ func isModelSupportErrorMessage(message string) bool {
 	return false
 }
 
+// ModelSupportError reports whether err indicates the requested model is not served (400/422 + message patterns).
+func ModelSupportError(err error) bool {
+	return isModelSupportError(err)
+}
+
 func isModelSupportError(err error) bool {
 	if err == nil {
 		return false

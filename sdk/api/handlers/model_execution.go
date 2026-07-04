@@ -185,18 +185,22 @@ func receiveInitialModelExecutionChunk(ctx context.Context, dataChan <-chan []by
 	if ctx != nil {
 		done = ctx.Done()
 	}
-	for dataChan != nil || errChan != nil {
+	if dataChan != nil {
 		select {
 		case payload, ok := <-dataChan:
-			if !ok {
-				dataChan = nil
-				continue
+			if ok {
+				return []ModelExecutionChunk{{Payload: cloneBytes(payload)}}, dataChan, errChan, nil
 			}
-			return []ModelExecutionChunk{{Payload: cloneBytes(payload)}}, dataChan, errChan, nil
+			dataChan = nil
+		case <-done:
+			return nil, dataChan, errChan, nil
+		}
+	}
+	if errChan != nil {
+		select {
 		case errMsg, ok := <-errChan:
 			if !ok {
-				errChan = nil
-				continue
+				return nil, dataChan, nil, nil
 			}
 			if errMsg != nil {
 				return nil, dataChan, errChan, errMsg

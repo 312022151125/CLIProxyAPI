@@ -429,6 +429,9 @@ func NewBaseAPIHandlers(cfg *config.SDKConfig, authManager *coreauth.Manager) *B
 	return &BaseAPIHandler{
 		Cfg:         cfg,
 		AuthManager: authManager,
+		quotaExceeded: QuotaExceededBehavior{
+			SwitchPreviewModel: true,
+		},
 	}
 }
 

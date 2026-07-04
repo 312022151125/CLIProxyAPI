@@ -17,6 +17,7 @@ var (
 	glm5Family        = regexp.MustCompile(`^glm-5(?:\.(\d+))?$`)
 	kimiK2Family      = regexp.MustCompile(`^kimi-k2\.(\d+)(?:-code(?:-highspeed)?)?$`)
 	gpt5Family        = regexp.MustCompile(`^gpt-5(?:\.(\d+))?(?:-mini)?$`)
+	minimaxMFamily    = regexp.MustCompile(`^minimax-m(\d+)(?:\.(\d+))?$`)
 )
 
 type familyRank struct {
@@ -167,6 +168,14 @@ func familyRankForBase(base string) (familyRank, bool) {
 			rank--
 		}
 		return familyRank{key: "gpt-5", rank: rank}, true
+	}
+	if m := minimaxMFamily.FindStringSubmatch(base); len(m) >= 2 {
+		major := parseInt64(m[1])
+		minor := int64(0)
+		if len(m) >= 3 && m[2] != "" {
+			minor = parseInt64(m[2])
+		}
+		return familyRank{key: "minimax-m", rank: major*1000 + minor}, true
 	}
 	return familyRank{}, false
 }

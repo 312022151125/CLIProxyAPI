@@ -10,6 +10,13 @@ import (
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 )
 
+func TestNewBaseAPIHandlers_DefaultSwitchPreviewModelEnabled(t *testing.T) {
+	h := NewBaseAPIHandlers(nil, nil)
+	if !h.modelVersionFallbackEnabled() {
+		t.Fatal("expected version fallback enabled by default on new handler")
+	}
+}
+
 func TestShouldAttemptModelVersionFallback(t *testing.T) {
 	h := &BaseAPIHandler{quotaExceeded: QuotaExceededBehavior{SwitchPreviewModel: true}}
 	tests := []struct {

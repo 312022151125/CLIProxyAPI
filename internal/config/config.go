@@ -710,6 +710,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 			if os.IsNotExist(err) || errors.Is(err, syscall.EISDIR) {
 				// Missing and optional: return empty config (cloud deploy standby).
 				cfg := &Config{}
+				cfg.QuotaExceeded.SwitchPreviewModel = true
 				cfg.NormalizePluginsConfig()
 				return cfg, nil
 			}
@@ -720,6 +721,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	// In cloud deploy mode (optional=true), if file is empty or contains only whitespace, return empty config.
 	if optional && len(data) == 0 {
 		cfg := &Config{}
+		cfg.QuotaExceeded.SwitchPreviewModel = true
 		cfg.NormalizePluginsConfig()
 		return cfg, nil
 	}
@@ -739,6 +741,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.DisableImageGeneration = DisableImageGenerationOff
 	cfg.Pprof.Enable = false
 	cfg.Pprof.Addr = DefaultPprofAddr
+	cfg.QuotaExceeded.SwitchPreviewModel = true
 	cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
 	if err = yaml.Unmarshal(data, &cfg); err != nil {
 		if optional {

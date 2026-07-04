@@ -62,6 +62,77 @@ func TestNextFallbackModel(t *testing.T) {
 	}
 }
 
+func TestChainFullFamilies(t *testing.T) {
+	tests := []struct {
+		name      string
+		client    string
+		models    []string
+		request   string
+		wantChain []string
+	}{
+		{
+			name:      "glm-5.2 to glm-5",
+			client:    "chain-glm",
+			models:    []string{"glm-5", "glm-5.1", "glm-5.2"},
+			request:   "glm-5.2",
+			wantChain: []string{"glm-5.1", "glm-5"},
+		},
+		{
+			name:      "kimi-k2.7 to kimi-k2.5",
+			client:    "chain-kimi",
+			models:    []string{"kimi-k2.5", "kimi-k2.6", "kimi-k2.7"},
+			request:   "kimi-k2.7",
+			wantChain: []string{"kimi-k2.6", "kimi-k2.5"},
+		},
+		{
+			name:      "kimi-k2.7-code-highspeed",
+			client:    "chain-kimi-code",
+			models:    []string{"kimi-k2.6", "kimi-k2.7", "kimi-k2.7-code-highspeed"},
+			request:   "kimi-k2.7-code-highspeed",
+			wantChain: []string{"kimi-k2.6"},
+		},
+		{
+			name:      "minimax-m3 to m2.7",
+			client:    "chain-minimax",
+			models:    []string{"minimax-m2.7", "minimax-m3"},
+			request:   "minimax-m3",
+			wantChain: []string{"minimax-m2.7"},
+		},
+		{
+			name:      "claude-opus-4-8 chain",
+			client:    "chain-claude",
+			models:    []string{"claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8"},
+			request:   "claude-opus-4-8",
+			wantChain: []string{"claude-opus-4-7", "claude-opus-4-6"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registerTestModels(t, tt.client, "openai", tt.models...)
+			got := Chain(tt.request, nil)
+			if len(got) != len(tt.wantChain) {
+				t.Fatalf("Chain(%q) = %v, want %v", tt.request, got, tt.wantChain)
+			}
+			for i := range tt.wantChain {
+				if got[i] != tt.wantChain[i] {
+					t.Fatalf("chain[%d] = %q, want %q", i, got[i], tt.wantChain[i])
+				}
+			}
+		})
+	}
+}
+
+func TestNextMinimaxFamily(t *testing.T) {
+	const client = "minimax-next-test"
+	registerTestModels(t, client, "openai", "minimax-m2.5", "minimax-m2.7", "minimax-m3")
+	if got := Next("minimax-m3", nil); got != "minimax-m2.7" {
+		t.Fatalf("Next(minimax-m3) = %q, want minimax-m2.7", got)
+	}
+	if got := Next("minimax-m2.7", nil); got != "minimax-m2.5" {
+		t.Fatalf("Next(minimax-m2.7) = %q, want minimax-m2.5", got)
+	}
+}
+
 func TestChainMultiHop(t *testing.T) {
 	const client = "modelversion-chain-test"
 	registerTestModels(t, client, "openai", "glm-5", "glm-5.1", "glm-5.2")

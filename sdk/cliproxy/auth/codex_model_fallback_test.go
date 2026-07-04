@@ -3,6 +3,7 @@ package auth
 import (
 	"testing"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
@@ -31,6 +32,13 @@ func TestHasCodexProvider(t *testing.T) {
 }
 
 func TestBuildCodexFallbackRequest(t *testing.T) {
+	const clientID = "codex-fallback-test-client"
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(clientID, "codex", []*registry.ModelInfo{
+		{ID: "gpt-5.4"},
+		{ID: "gpt-5.5"},
+	})
+	t.Cleanup(func() { reg.UnregisterClient(clientID) })
 	tests := []struct {
 		name             string
 		model            string

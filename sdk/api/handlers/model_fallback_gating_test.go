@@ -11,6 +11,7 @@ import (
 )
 
 func TestShouldAttemptModelVersionFallback(t *testing.T) {
+	h := &BaseAPIHandler{quotaExceeded: QuotaExceededBehavior{SwitchPreviewModel: true}}
 	tests := []struct {
 		name string
 		err  error
@@ -27,12 +28,17 @@ func TestShouldAttemptModelVersionFallback(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "capacity 429",
+			err:  &coreauth.Error{HTTPStatus: http.StatusTooManyRequests, Message: "Selected model is at capacity. Please try a different model."},
+			want: true,
+		},
+		{
 			name: "auth not found",
 			err:  &coreauth.Error{Code: "auth_not_found", Message: "no auth available", HTTPStatus: http.StatusUnauthorized},
 			want: false,
 		},
 		{
-			name: "rate limit",
+			name: "rate limit without capacity",
 			err:  &coreauth.Error{Code: "auth_unavailable", Message: "rate limited", HTTPStatus: http.StatusTooManyRequests},
 			want: false,
 		},
@@ -44,14 +50,23 @@ func TestShouldAttemptModelVersionFallback(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldAttemptModelVersionFallback(tt.err); got != tt.want {
+			if got := h.shouldAttemptModelVersionFallback(tt.err); got != tt.want {
 				t.Fatalf("shouldAttemptModelVersionFallback() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
+func TestShouldAttemptModelVersionFallback_DisabledWhenSwitchOff(t *testing.T) {
+	h := &BaseAPIHandler{quotaExceeded: QuotaExceededBehavior{SwitchPreviewModel: false}}
+	err := &coreauth.Error{HTTPStatus: http.StatusBadRequest, Message: "unsupported model"}
+	if h.shouldAttemptModelVersionFallback(err) {
+		t.Fatal("expected false when switch-preview-model is disabled")
+	}
+}
+
 func TestShouldAttemptRoutingModelVersionFallback(t *testing.T) {
+	h := &BaseAPIHandler{quotaExceeded: QuotaExceededBehavior{SwitchPreviewModel: true}}
 	tests := []struct {
 		name   string
 		errMsg *interfaces.ErrorMessage
@@ -81,7 +96,7 @@ func TestShouldAttemptRoutingModelVersionFallback(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldAttemptRoutingModelVersionFallback(tt.errMsg); got != tt.want {
+			if got := h.shouldAttemptRoutingModelVersionFallback(tt.errMsg); got != tt.want {
 				t.Fatalf("shouldAttemptRoutingModelVersionFallback() = %v, want %v", got, tt.want)
 			}
 		})

@@ -316,6 +316,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		wsRoutes:            make(map[string]struct{}),
 		pluginHost:          optionState.pluginHost,
 	}
+	s.handlers.SetQuotaExceededBehavior(cfg.QuotaExceeded)
 	s.wsAuthEnabled.Store(cfg.WebsocketAuth)
 	s.handlers.SetPluginHost(optionState.pluginHost)
 	if optionState.pluginHost != nil {
@@ -1688,6 +1689,7 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 	s.oldConfigYaml, _ = yaml.Marshal(cfg)
 
 	s.handlers.UpdateClients(effectiveSDKConfig(cfg))
+	s.handlers.SetQuotaExceededBehavior(cfg.QuotaExceeded)
 	s.handlers.SetPluginHost(s.pluginHost)
 	if s.pluginHost != nil {
 		s.pluginHost.SetModelExecutor(s.handlers)

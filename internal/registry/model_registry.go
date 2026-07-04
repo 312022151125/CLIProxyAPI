@@ -1037,6 +1037,22 @@ func (r *ModelRegistry) GetModelCount(modelID string) int {
 	return 0
 }
 
+// RegisteredModelIDs returns distinct model IDs with Count > 0.
+func (r *ModelRegistry) RegisteredModelIDs() []string {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
+	ids := make([]string, 0, len(r.models))
+	for modelID, registration := range r.models {
+		if registration == nil || registration.Count <= 0 {
+			continue
+		}
+		ids = append(ids, modelID)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // GetModelProviders returns provider identifiers that currently supply the given model
 // Parameters:
 //   - modelID: The model ID to check

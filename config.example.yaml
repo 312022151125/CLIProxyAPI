@@ -162,7 +162,7 @@ video-result-auth-cache-ttl: "3h"
 # Quota exceeded behavior
 quota-exceeded:
   switch-project: true # Whether to automatically switch to another project when a quota is exceeded
-  switch-preview-model: true # Whether to automatically switch to a preview model when a quota is exceeded
+  switch-preview-model: true # Downgrade within the same model family (e.g. glm-5.2 -> glm-5.1) when the model is unavailable or quota/capacity is exceeded; only registered models are used
   antigravity-credits: true # Whether to use credits as last-resort fallback when all free-tier auths are exhausted for Claude models
 
 # Routing strategy for selecting credentials when multiple match.

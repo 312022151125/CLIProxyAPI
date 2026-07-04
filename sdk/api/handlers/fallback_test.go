@@ -4,37 +4,6 @@ import (
 	"testing"
 )
 
-func TestMaybeFallbackModel(t *testing.T) {
-	tests := []struct {
-		in   string
-		want string
-	}{
-		{"claude-opus-4-8", "claude-opus-4-7"},
-		{"claude-opus-4-7", "claude-opus-4-6"},
-		{"claude-opus-4-6", ""},
-		{"claude-opus-4-8(high)", "claude-opus-4-7(high)"},
-		{"claude-opus-4-7(16384)", "claude-opus-4-6(16384)"},
-		{"claude-opus-4-8-20250801", "claude-opus-4-7"},
-		{"claude-sonnet-4-6", "claude-sonnet-4-5"},
-		{"claude-sonnet-4-6(high)", "claude-sonnet-4-5(high)"},
-		{"claude-sonnet-4-5", ""},
-		{"glm-5.2", "glm-5.1"},
-		{"glm-5.1", "glm-5"},
-		{"glm-5", ""},
-		{"kimi-k2.6", "kimi-k2.5"},
-		{"kimi-k2.6(8192)", "kimi-k2.5(8192)"},
-		{"kimi-k2.5", ""},
-		{"gpt-5.5", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.in, func(t *testing.T) {
-			if got := maybeFallbackModel(tt.in); got != tt.want {
-				t.Fatalf("maybeFallbackModel(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestWithFallbackModelInPayload(t *testing.T) {
 	tests := []struct {
 		name          string

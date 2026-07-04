@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
@@ -410,6 +411,9 @@ type BaseAPIHandler struct {
 	// ModelRouterHost optionally routes matching requests to a plugin executor, the router's own
 	// executor, or a built-in provider before model-to-provider resolution and auth selection.
 	ModelRouterHost PluginModelRouterHost
+
+	// quotaExceeded controls registry-driven model version downgrade.
+	quotaExceeded QuotaExceededBehavior
 }
 
 // NewBaseAPIHandlers creates a new API handlers instance.
@@ -435,6 +439,14 @@ func NewBaseAPIHandlers(cfg *config.SDKConfig, authManager *coreauth.Manager) *B
 //   - clients: The new slice of AI service clients
 //   - cfg: The new application configuration
 func (h *BaseAPIHandler) UpdateClients(cfg *config.SDKConfig) { h.Cfg = cfg }
+
+// SetQuotaExceededBehavior copies quota-exceeded failover settings into the handler.
+func (h *BaseAPIHandler) SetQuotaExceededBehavior(q internalconfig.QuotaExceeded) {
+	if h == nil {
+		return
+	}
+	h.quotaExceeded = QuotaExceededBehavior{SwitchPreviewModel: q.SwitchPreviewModel}
+}
 
 // SetPluginHost configures the optional plugin interceptor host.
 func (h *BaseAPIHandler) SetPluginHost(host PluginInterceptorHost) {
@@ -756,7 +768,19 @@ func restoreOriginalModelInChunk(chunk []byte, originalModel string) []byte {
 	}
 	return updated
 }
+
 func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entryProtocol, exitProtocol, modelName string, rawJSON []byte, alt string, allowImageModel bool, execOptions modelExecutionOptions) ([]byte, http.Header, *interfaces.ErrorMessage) {
+	originalRequestedModel := modelName
+	routeDecision := h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, false, execOptions)
+	if routeDecision.ExecutorPluginID != "" {
+		responseProtocol := modelExecutionResponseProtocol(entryProtocol, exitProtocol)
+		return h.executeWithPluginExecutor(ctx, entryProtocol, responseProtocol, modelName, originalRequestedModel, rawJSON, alt, routeDecision.ExecutorPluginID, execOptions)
+	}
+	providers, _, errMsg := h.providersForExecution(modelName, originalRequestedModel, allowImageModel, routeDecision)
+	_ = errMsg
+	return h.executeWithAuthManagerFormatsWithVersionFallback(ctx, entryProtocol, exitProtocol, modelName, rawJSON, alt, allowImageModel, execOptions, providers)
+}
+func (h *BaseAPIHandler) executeWithAuthManagerFormatsOnce(ctx context.Context, entryProtocol, exitProtocol, modelName string, rawJSON []byte, alt string, allowImageModel bool, execOptions modelExecutionOptions) ([]byte, http.Header, *interfaces.ErrorMessage) {
 	originalRequestedModel := modelName
 	routeDecision := h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, false, execOptions)
 	responseProtocol := modelExecutionResponseProtocol(entryProtocol, exitProtocol)
@@ -765,15 +789,6 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entr
 	}
 	providers, normalizedModel, errMsg := h.providersForExecution(modelName, originalRequestedModel, allowImageModel, routeDecision)
 	if errMsg != nil {
-		if shouldAttemptRoutingModelVersionFallback(errMsg) {
-			if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
-				body, headers, err := h.executeWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
-				if err == nil {
-					body = restoreOriginalModelInBody(body, originalRequestedModel)
-				}
-				return body, headers, err
-			}
-		}
 		return nil, nil, errMsg
 	}
 	reqMeta := requestExecutionMetadata(ctx)
@@ -804,15 +819,6 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entr
 	req, opts = h.applyRequestInterceptorsBeforeAuth(ctx, entryProtocol, originalRequestedModel, req, opts, execOptions.SkipInterceptorPluginID)
 	resp, err := h.AuthManager.Execute(ctx, providers, req, opts)
 	if err != nil {
-		if shouldAttemptModelVersionFallback(err) {
-			if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
-				body, headers, err := h.executeWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
-				if err == nil {
-					body = restoreOriginalModelInBody(body, originalRequestedModel)
-				}
-				return body, headers, err
-			}
-		}
 		err = enrichAuthSelectionError(err, providers, normalizedModel)
 		status := http.StatusInternalServerError
 		if se, ok := err.(interface{ StatusCode() int }); ok && se != nil {
@@ -847,17 +853,19 @@ func (h *BaseAPIHandler) executeCountWithAuthManager(ctx context.Context, handle
 	if routeDecision.ExecutorPluginID != "" {
 		return h.countWithPluginExecutor(ctx, handlerType, modelName, originalRequestedModel, rawJSON, alt, routeDecision.ExecutorPluginID, execOptions)
 	}
+	providers, _, errMsg := h.providersForExecution(modelName, originalRequestedModel, false, routeDecision)
+	_ = errMsg
+	return h.executeCountWithAuthManagerWithVersionFallback(ctx, handlerType, modelName, rawJSON, alt, execOptions, providers)
+}
+
+func (h *BaseAPIHandler) executeCountWithAuthManagerOnce(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string, execOptions modelExecutionOptions) ([]byte, http.Header, *interfaces.ErrorMessage) {
+	originalRequestedModel := modelName
+	routeDecision := h.applyModelRouter(ctx, handlerType, modelName, rawJSON, false, execOptions)
+	if routeDecision.ExecutorPluginID != "" {
+		return h.countWithPluginExecutor(ctx, handlerType, modelName, originalRequestedModel, rawJSON, alt, routeDecision.ExecutorPluginID, execOptions)
+	}
 	providers, normalizedModel, errMsg := h.providersForExecution(modelName, originalRequestedModel, false, routeDecision)
 	if errMsg != nil {
-		if shouldAttemptRoutingModelVersionFallback(errMsg) {
-			if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
-				body, headers, err := h.executeCountWithAuthManager(ctx, handlerType, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, execOptions)
-				if err == nil {
-					body = restoreOriginalModelInBody(body, originalRequestedModel)
-				}
-				return body, headers, err
-			}
-		}
 		return nil, nil, errMsg
 	}
 	reqMeta := requestExecutionMetadata(ctx)
@@ -886,15 +894,6 @@ func (h *BaseAPIHandler) executeCountWithAuthManager(ctx context.Context, handle
 	req, opts = h.applyRequestInterceptorsBeforeAuth(ctx, handlerType, originalRequestedModel, req, opts, execOptions.SkipInterceptorPluginID)
 	resp, err := h.AuthManager.ExecuteCount(ctx, providers, req, opts)
 	if err != nil {
-		if shouldAttemptModelVersionFallback(err) {
-			if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
-				body, headers, err := h.executeCountWithAuthManager(ctx, handlerType, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, execOptions)
-				if err == nil {
-					body = restoreOriginalModelInBody(body, originalRequestedModel)
-				}
-				return body, headers, err
-			}
-		}
 		status := http.StatusInternalServerError
 		err = enrichAuthSelectionError(err, providers, normalizedModel)
 		if se, ok := err.(interface{ StatusCode() int }); ok && se != nil {
@@ -1186,35 +1185,20 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 	if routeDecision.ExecutorPluginID != "" {
 		return h.streamWithPluginExecutor(ctx, entryProtocol, responseProtocol, modelName, originalRequestedModel, rawJSON, alt, routeDecision.ExecutorPluginID, execOptions)
 	}
+	providers, _, errMsg := h.providersForExecution(modelName, originalRequestedModel, allowImageModel, routeDecision)
+	_ = errMsg
+	return h.executeStreamWithAuthManagerFormatsWithVersionFallback(ctx, entryProtocol, exitProtocol, modelName, rawJSON, alt, allowImageModel, execOptions, providers)
+}
+
+func (h *BaseAPIHandler) executeStreamWithAuthManagerFormatsOnce(ctx context.Context, entryProtocol, exitProtocol, modelName string, rawJSON []byte, alt string, allowImageModel bool, execOptions modelExecutionOptions) (<-chan []byte, http.Header, <-chan *interfaces.ErrorMessage) {
+	originalRequestedModel := modelName
+	routeDecision := h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, true, execOptions)
+	responseProtocol := modelExecutionResponseProtocol(entryProtocol, exitProtocol)
+	if routeDecision.ExecutorPluginID != "" {
+		return h.streamWithPluginExecutor(ctx, entryProtocol, responseProtocol, modelName, originalRequestedModel, rawJSON, alt, routeDecision.ExecutorPluginID, execOptions)
+	}
 	providers, normalizedModel, errMsg := h.providersForExecution(modelName, originalRequestedModel, allowImageModel, routeDecision)
 	if errMsg != nil {
-		if shouldAttemptRoutingModelVersionFallback(errMsg) {
-			if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
-				dataChan, headers, errChan := h.executeStreamWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
-				if dataChan == nil {
-					return nil, headers, errChan
-				}
-				wrapped := make(chan []byte)
-				go func(displayModel string) {
-					defer close(wrapped)
-					for chunk := range dataChan {
-						if len(chunk) > 0 {
-							chunk = restoreOriginalModelInChunk(chunk, displayModel)
-						}
-						if ctx == nil {
-							wrapped <- chunk
-							continue
-						}
-						select {
-						case <-ctx.Done():
-							return
-						case wrapped <- chunk:
-						}
-					}
-				}(originalRequestedModel)
-				return wrapped, headers, errChan
-			}
-		}
 		errChan := make(chan *interfaces.ErrorMessage, 1)
 		errChan <- errMsg
 		close(errChan)
@@ -1248,33 +1232,6 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 	req, opts = h.applyRequestInterceptorsBeforeAuth(ctx, entryProtocol, originalRequestedModel, req, opts, execOptions.SkipInterceptorPluginID)
 	streamResult, err := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
 	if err != nil {
-		if shouldAttemptModelVersionFallback(err) {
-			if fallbackModel := maybeFallbackModel(modelName); fallbackModel != "" {
-				dataChan, headers, errChan := h.executeStreamWithAuthManagerFormats(ctx, entryProtocol, exitProtocol, fallbackModel, withFallbackModelInPayload(rawJSON, fallbackModel), alt, allowImageModel, execOptions)
-				if dataChan == nil {
-					return nil, headers, errChan
-				}
-				wrapped := make(chan []byte)
-				go func(displayModel string) {
-					defer close(wrapped)
-					for chunk := range dataChan {
-						if len(chunk) > 0 {
-							chunk = restoreOriginalModelInChunk(chunk, displayModel)
-						}
-						if ctx == nil {
-							wrapped <- chunk
-							continue
-						}
-						select {
-						case <-ctx.Done():
-							return
-						case wrapped <- chunk:
-						}
-					}
-				}(originalRequestedModel)
-				return wrapped, headers, errChan
-			}
-		}
 		err = enrichAuthSelectionError(err, providers, normalizedModel)
 		errChan := make(chan *interfaces.ErrorMessage, 1)
 		status := http.StatusInternalServerError

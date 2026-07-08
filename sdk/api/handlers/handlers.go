@@ -816,6 +816,9 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormatsOnce(ctx context.Context, 
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = originalRequestedModel
 	addAuthSelectionModelMetadata(reqMeta, execOptions.AuthSelectionModel)
 	addModelExecutionSourceMetadata(reqMeta, execOptions.InternalSource)
+	if execOptions.RequestPath != "" {
+		reqMeta[coreexecutor.RequestPathMetadataKey] = execOptions.RequestPath
+	}
 	setReasoningEffortMetadata(reqMeta, entryProtocol, normalizedModel, rawJSON)
 	setServiceTierMetadata(reqMeta, rawJSON)
 	payload := rawJSON
@@ -835,6 +838,7 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormatsOnce(ctx context.Context, 
 		ResponseFormat:              sdktranslator.FromString(responseProtocol),
 		Headers:                     modelExecutionHeaders(ctx, execOptions.Headers),
 		Query:                       modelExecutionQuery(ctx, execOptions.Query),
+		Method:                      execOptions.Method,
 		RequestAfterAuthInterceptor: h.requestAfterAuthInterceptor(afterAuthCapture, execOptions.SkipInterceptorPluginID),
 	}
 	opts.Metadata = reqMeta
@@ -983,6 +987,9 @@ func (h *BaseAPIHandler) pluginExecutorRequest(ctx context.Context, entryProtoco
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = originalRequestedModel
 	addAuthSelectionModelMetadata(reqMeta, execOptions.AuthSelectionModel)
 	addModelExecutionSourceMetadata(reqMeta, execOptions.InternalSource)
+	if execOptions.RequestPath != "" {
+		reqMeta[coreexecutor.RequestPathMetadataKey] = execOptions.RequestPath
+	}
 	setReasoningEffortMetadata(reqMeta, entryProtocol, modelName, rawJSON)
 	setServiceTierMetadata(reqMeta, rawJSON)
 	payload := rawJSON
@@ -998,6 +1005,7 @@ func (h *BaseAPIHandler) pluginExecutorRequest(ctx context.Context, entryProtoco
 		ResponseFormat:  sdktranslator.FromString(responseProtocol),
 		Headers:         modelExecutionHeaders(ctx, execOptions.Headers),
 		Query:           modelExecutionQuery(ctx, execOptions.Query),
+		Method:          execOptions.Method,
 		Metadata:        reqMeta,
 	}
 	return req, opts
@@ -1247,6 +1255,9 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormatsOnce(ctx context.Con
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = originalRequestedModel
 	addAuthSelectionModelMetadata(reqMeta, execOptions.AuthSelectionModel)
 	addModelExecutionSourceMetadata(reqMeta, execOptions.InternalSource)
+	if execOptions.RequestPath != "" {
+		reqMeta[coreexecutor.RequestPathMetadataKey] = execOptions.RequestPath
+	}
 	setReasoningEffortMetadata(reqMeta, entryProtocol, normalizedModel, rawJSON)
 	setServiceTierMetadata(reqMeta, rawJSON)
 	payload := rawJSON
@@ -1266,6 +1277,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormatsOnce(ctx context.Con
 		ResponseFormat:              sdktranslator.FromString(responseProtocol),
 		Headers:                     modelExecutionHeaders(ctx, execOptions.Headers),
 		Query:                       modelExecutionQuery(ctx, execOptions.Query),
+		Method:                      execOptions.Method,
 		RequestAfterAuthInterceptor: h.requestAfterAuthInterceptor(afterAuthCapture, execOptions.SkipInterceptorPluginID),
 	}
 	opts.Metadata = reqMeta

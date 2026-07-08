@@ -489,6 +489,8 @@ func isExampleAPIKeySafeModeProxyPath(path string) bool {
 		return true
 	case path == "/backend-api/codex" || strings.HasPrefix(path, "/backend-api/codex/"):
 		return true
+	case strings.HasPrefix(path, "/files/"):
+		return true
 	default:
 		return false
 	}
@@ -524,6 +526,10 @@ func (s *Server) setupRoutes() {
 		v1.POST("/embeddings", openaiHandlers.Embeddings)
 		v1.POST("/images/generations", openaiHandlers.ImagesGenerations)
 		v1.POST("/images/edits", openaiHandlers.ImagesEdits)
+		v1.POST("/search", openaiHandlers.Search)
+		v1.POST("/ppt/generations", openaiHandlers.PPTGenerations)
+		v1.POST("/psd/generations", openaiHandlers.PSDGenerations)
+		v1.GET("/editable-file-tasks", openaiHandlers.EditableFileTasks)
 		v1.POST("/videos", openaiHandlers.XAIVideosGenerations)
 		v1.POST("/videos/generations", openaiHandlers.XAIVideosGenerations)
 		v1.POST("/videos/edits", openaiHandlers.XAIVideosEdits)
@@ -534,6 +540,12 @@ func (s *Server) setupRoutes() {
 		v1.GET("/responses", openaiResponsesHandlers.ResponsesWebsocket)
 		v1.POST("/responses", openaiResponsesHandlers.Responses)
 		v1.POST("/responses/compact", openaiResponsesHandlers.Compact)
+	}
+
+	files := s.engine.Group("/files")
+	files.Use(AuthMiddleware(s.accessManager))
+	{
+		files.GET("/*filepath", openaiHandlers.FilesDownload)
 	}
 
 	openaiV1 := s.engine.Group("/openai/v1")

@@ -27,6 +27,11 @@ var aiAPIPrefixes = []string{
 	"/openai/v1/videos",
 	"/v1beta/models/",
 	"/backend-api/codex/",
+	"/v1/search",
+	"/v1/ppt",
+	"/v1/psd",
+	"/v1/editable-file-tasks",
+	"/files/",
 }
 
 const (

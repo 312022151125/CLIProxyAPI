@@ -97,6 +97,8 @@ type Options struct {
 	Headers http.Header
 	// Query contains optional query string parameters.
 	Query url.Values
+	// Method is the upstream HTTP method. Empty means POST.
+	Method string
 	// OriginalRequest preserves the inbound request bytes prior to translation.
 	OriginalRequest []byte
 	// SourceFormat identifies the inbound schema.

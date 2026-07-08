@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -126,12 +127,22 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	}
 	reporter.SetTranslatedReasoningEffort(translated, to.String())
 
-	url := strings.TrimSuffix(baseURL, "/") + endpoint
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(translated))
+	method := openAICompatHTTPMethod(opts)
+	targetURL, err := openAICompatUpstreamURL(baseURL, endpoint, opts.Query)
 	if err != nil {
 		return resp, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	var bodyReader io.Reader
+	if len(translated) > 0 {
+		bodyReader = bytes.NewReader(translated)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, targetURL, bodyReader)
+	if err != nil {
+		return resp, err
+	}
+	if method == http.MethodPost || len(translated) > 0 {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
 	if apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	}
@@ -148,8 +159,8 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		authType, authValue = auth.AccountInfo()
 	}
 	helps.RecordAPIRequest(ctx, e.cfg, helps.UpstreamRequestLog{
-		URL:       url,
-		Method:    http.MethodPost,
+		URL:       targetURL,
+		Method:    method,
 		Headers:   httpReq.Header.Clone(),
 		Body:      translated,
 		Provider:  e.Identifier(),
@@ -331,12 +342,22 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	}
 	reporter.SetTranslatedReasoningEffort(translated, to.String())
 
-	url := strings.TrimSuffix(baseURL, "/") + endpoint
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(translated))
+	method := openAICompatHTTPMethod(opts)
+	targetURL, err := openAICompatUpstreamURL(baseURL, endpoint, opts.Query)
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	var bodyReader io.Reader
+	if len(translated) > 0 {
+		bodyReader = bytes.NewReader(translated)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, targetURL, bodyReader)
+	if err != nil {
+		return nil, err
+	}
+	if method == http.MethodPost || len(translated) > 0 {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
 	if apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	}
@@ -359,8 +380,8 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		authType, authValue = auth.AccountInfo()
 	}
 	helps.RecordAPIRequest(ctx, e.cfg, helps.UpstreamRequestLog{
-		URL:       url,
-		Method:    http.MethodPost,
+		URL:       targetURL,
+		Method:    method,
 		Headers:   httpReq.Header.Clone(),
 		Body:      translated,
 		Provider:  e.Identifier(),
@@ -651,11 +672,50 @@ func openAICompatImageEndpointPath(opts cliproxyexecutor.Options) string {
 	return openAICompatDefaultImageEndpoint
 }
 
+func openAICompatHTTPMethod(opts cliproxyexecutor.Options) string {
+	method := strings.ToUpper(strings.TrimSpace(opts.Method))
+	if method == "" {
+		return http.MethodPost
+	}
+	return method
+}
+
+func openAICompatUpstreamURL(baseURL, endpoint string, query url.Values) (string, error) {
+	raw := strings.TrimSuffix(strings.TrimSpace(baseURL), "/") + endpoint
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	if len(query) > 0 {
+		existing := parsed.Query()
+		for key, values := range query {
+			existing[key] = append([]string(nil), values...)
+		}
+		parsed.RawQuery = existing.Encode()
+	}
+	return parsed.String(), nil
+}
+
 func openAICompatEndpointPath(opts cliproxyexecutor.Options) string {
 	if endpointPath := openAICompatImageEndpointPath(opts); endpointPath != "" {
 		return endpointPath
 	}
 	path := helps.PayloadRequestPath(opts)
+	if strings.HasSuffix(path, "/search") {
+		return "/search"
+	}
+	if strings.HasSuffix(path, "/ppt/generations") {
+		return "/ppt/generations"
+	}
+	if strings.HasSuffix(path, "/psd/generations") {
+		return "/psd/generations"
+	}
+	if strings.HasSuffix(path, "/editable-file-tasks") {
+		return "/editable-file-tasks"
+	}
+	if strings.HasPrefix(path, "/files/") {
+		return path
+	}
 	if strings.HasSuffix(path, "/embeddings") {
 		return "/embeddings"
 	}

@@ -22,6 +22,8 @@ type modelExecutionOptions struct {
 	SkipRouterPluginID      string
 	ForcedProvider          string
 	AuthSelectionModel      string
+	Method                  string
+	RequestPath             string
 }
 
 // ProtocolExecutionRequest describes a route-level model execution request with explicit protocols.
@@ -88,6 +90,28 @@ func (e *ModelExecutionStreamError) Error() string {
 		return e.Message
 	}
 	return http.StatusText(e.StatusCode)
+}
+
+// ExecuteOpenAICompatPassthrough proxies provider-specific OpenAI-compatible HTTP endpoints.
+func (h *BaseAPIHandler) ExecuteOpenAICompatPassthrough(ctx context.Context, modelName string, rawJSON []byte, method, requestPath string, headers http.Header, query url.Values) ([]byte, http.Header, *interfaces.ErrorMessage) {
+	return h.executeWithAuthManagerFormats(ctx, "openai", "openai", modelName, rawJSON, "", false, modelExecutionOptions{
+		Method:             method,
+		RequestPath:        requestPath,
+		Headers:            headers,
+		Query:              query,
+		AuthSelectionModel: modelName,
+	})
+}
+
+// ExecuteOpenAICompatPassthroughStream proxies streaming OpenAI-compatible provider endpoints.
+func (h *BaseAPIHandler) ExecuteOpenAICompatPassthroughStream(ctx context.Context, modelName string, rawJSON []byte, method, requestPath string, headers http.Header, query url.Values) (<-chan []byte, http.Header, <-chan *interfaces.ErrorMessage) {
+	return h.executeStreamWithAuthManagerFormats(ctx, "openai", "openai", modelName, rawJSON, "", false, modelExecutionOptions{
+		Method:             method,
+		RequestPath:        requestPath,
+		Headers:            headers,
+		Query:              query,
+		AuthSelectionModel: modelName,
+	})
 }
 
 // ExecuteModel executes an internal non-streaming model request.

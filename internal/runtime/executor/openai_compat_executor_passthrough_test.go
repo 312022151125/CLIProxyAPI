@@ -142,7 +142,7 @@ func TestOpenAICompatExecutorColonEffortUsesSupportedReasoning(t *testing.T) {
 		OpenAICompatibility: []config.OpenAICompatibility{{
 			Name: compatName,
 			Models: []config.OpenAICompatibilityModel{{
-				Name:  model,
+				Name:  model + ":xhigh",
 				Alias: alias,
 				Thinking: &registry.ThinkingSupport{
 					Levels: []string{"low", "medium", "high", "xhigh"},

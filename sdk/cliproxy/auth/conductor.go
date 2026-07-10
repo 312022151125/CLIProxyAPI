@@ -1140,10 +1140,9 @@ func ResolveOpenAICompatColonEffortModel(cfg *internalconfig.Config, auth *Auth,
 		model := entry.Models[i]
 		name := strings.TrimSpace(model.Name)
 		alias := strings.TrimSpace(model.Alias)
-		if strings.EqualFold(name, requestedModel) || strings.EqualFold(alias, requestedModel) {
-			return requestedModel, "", false
-		}
-		if !strings.EqualFold(name, baseModel) && !strings.EqualFold(alias, baseModel) {
+		fullMatch := strings.EqualFold(name, requestedModel) || strings.EqualFold(alias, requestedModel)
+		baseMatch := strings.EqualFold(name, baseModel) || strings.EqualFold(alias, baseModel)
+		if !fullMatch && !baseMatch {
 			continue
 		}
 		levels := []string{"low", "medium", "high"}
@@ -1152,6 +1151,9 @@ func ResolveOpenAICompatColonEffortModel(cfg *internalconfig.Config, auth *Auth,
 		}
 		if thinking.HasLevel(levels, effort) {
 			return baseModel, effort, true
+		}
+		if fullMatch {
+			return requestedModel, "", false
 		}
 	}
 	return requestedModel, "", false

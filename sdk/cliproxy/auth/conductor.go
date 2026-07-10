@@ -1109,7 +1109,74 @@ func (m *Manager) resolveOpenAICompatUpstreamModelPool(auth *Auth, requestedMode
 	if entry == nil {
 		return nil
 	}
+	if baseModel, effort, ok := ResolveOpenAICompatColonEffortModel(cfg, auth, requestedModel); ok {
+		pool := resolveModelAliasPoolFromConfigModels(baseModel, asModelAliasEntries(entry.Models))
+		for i := range pool {
+			pool[i] = strings.TrimSpace(pool[i]) + ":" + effort
+		}
+		return pool
+	}
 	return resolveModelAliasPoolFromConfigModels(requestedModel, asModelAliasEntries(entry.Models))
+}
+
+// ResolveOpenAICompatColonEffortModel recognizes supported colon-form reasoning levels.
+// Unknown or unsupported suffixes remain literal model identifiers.
+func ResolveOpenAICompatColonEffortModel(cfg *internalconfig.Config, auth *Auth, requestedModel string) (string, string, bool) {
+	requestedModel = strings.TrimSpace(requestedModel)
+	separator := strings.LastIndex(requestedModel, ":")
+	if separator <= 0 || separator == len(requestedModel)-1 {
+		return requestedModel, "", false
+	}
+	effort := strings.ToLower(strings.TrimSpace(requestedModel[separator+1:]))
+	if !isOpenAICompatColonEffort(effort) {
+		return requestedModel, "", false
+	}
+	entry := resolveOpenAICompatConfigForAuth(cfg, auth)
+	if entry == nil {
+		return requestedModel, "", false
+	}
+	baseModel := strings.TrimSpace(requestedModel[:separator])
+	for i := range entry.Models {
+		model := entry.Models[i]
+		name := strings.TrimSpace(model.Name)
+		alias := strings.TrimSpace(model.Alias)
+		if strings.EqualFold(name, requestedModel) || strings.EqualFold(alias, requestedModel) {
+			return requestedModel, "", false
+		}
+		if !strings.EqualFold(name, baseModel) && !strings.EqualFold(alias, baseModel) {
+			continue
+		}
+		levels := []string{"low", "medium", "high"}
+		if model.Thinking != nil {
+			levels = model.Thinking.Levels
+		}
+		if thinking.HasLevel(levels, effort) {
+			return baseModel, effort, true
+		}
+	}
+	return requestedModel, "", false
+}
+
+func isOpenAICompatColonEffort(effort string) bool {
+	switch effort {
+	case "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveOpenAICompatConfigForAuth(cfg *internalconfig.Config, auth *Auth) *internalconfig.OpenAICompatibility {
+	if auth == nil {
+		return nil
+	}
+	providerKey := ""
+	compatName := ""
+	if auth.Attributes != nil {
+		providerKey = strings.TrimSpace(auth.Attributes["provider_key"])
+		compatName = strings.TrimSpace(auth.Attributes["compat_name"])
+	}
+	return resolveOpenAICompatConfig(cfg, providerKey, compatName, auth.Provider)
 }
 
 func preserveRequestedModelSuffix(requestedModel, resolved string) string {
@@ -1142,6 +1209,12 @@ func (m *Manager) selectionModelForAuth(auth *Auth, routeModel string) string {
 	requestedModel := rewriteModelForAuth(routeModel, auth)
 	if strings.TrimSpace(requestedModel) == "" {
 		requestedModel = strings.TrimSpace(routeModel)
+	}
+	if isOpenAICompatAPIKeyAuth(auth) {
+		cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
+		if baseModel, _, ok := ResolveOpenAICompatColonEffortModel(cfg, auth, requestedModel); ok {
+			requestedModel = baseModel
+		}
 	}
 	resolvedModel := m.applyOAuthModelAlias(auth, requestedModel)
 	if strings.TrimSpace(resolvedModel) == "" {

@@ -255,6 +255,44 @@ func TestResolveModelAliasPoolFromConfigModels(t *testing.T) {
 		}
 	}
 }
+func TestManagerExecute_OpenAICompatAliasPreservesColonInUpstreamModel(t *testing.T) {
+	alias := "deepseek-v4-pro"
+	executor := &openAICompatPoolExecutor{id: openAICompatPoolProviderKey}
+	m := newOpenAICompatPoolTestManager(t, alias, []internalconfig.OpenAICompatibilityModel{
+		{Name: "deepseek-v4-flash:max", Alias: alias},
+	}, executor)
+
+	if _, err := m.Execute(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: alias}, cliproxyexecutor.Options{}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	got := executor.ExecuteModels()
+	if len(got) != 1 || got[0] != "deepseek-v4-flash:max" {
+		t.Fatalf("execute models = %v, want [deepseek-v4-flash:max]", got)
+	}
+}
+func TestManagerExecute_OpenAICompatAliasResolvesColonEffort(t *testing.T) {
+	alias := "deepseek-v4-pro"
+	executor := &openAICompatPoolExecutor{id: openAICompatPoolProviderKey}
+	m := newOpenAICompatPoolTestManager(t, alias, []internalconfig.OpenAICompatibilityModel{
+		{
+			Name:  "deepseek-v4-flash",
+			Alias: alias,
+			Thinking: &registry.ThinkingSupport{
+				Levels: []string{"low", "medium", "high", "xhigh"},
+			},
+		},
+	}, executor)
+
+	if _, err := m.Execute(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: alias + ":xhigh"}, cliproxyexecutor.Options{}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	got := executor.ExecuteModels()
+	if len(got) != 1 || got[0] != "deepseek-v4-flash:xhigh" {
+		t.Fatalf("execute models = %v, want [deepseek-v4-flash:xhigh]", got)
+	}
+}
 
 func TestManagerExecute_OpenAICompatAliasPoolRotatesWithinAuth(t *testing.T) {
 	alias := "claude-opus-4.66"

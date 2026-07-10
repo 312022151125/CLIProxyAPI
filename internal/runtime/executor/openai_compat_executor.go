@@ -90,6 +90,10 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	}
 
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
+	colonBaseModel, colonEffort, hasColonEffort := cliproxyauth.ResolveOpenAICompatColonEffortModel(e.cfg, auth, req.Model)
+	if hasColonEffort {
+		baseModel = colonBaseModel
+	}
 
 	reporter := helps.NewExecutorUsageReporter(ctx, e, baseModel, auth)
 	defer reporter.TrackFailure(ctx, &err)
@@ -114,6 +118,9 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	translated, err = thinking.ApplyThinking(translated, req.Model, from.String(), to.String(), e.Identifier())
 	if err != nil {
 		return resp, err
+	}
+	if hasColonEffort {
+		translated, _ = sjson.SetBytes(translated, "reasoning_effort", colonEffort)
 	}
 
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
@@ -305,6 +312,10 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	}
 
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
+	colonBaseModel, colonEffort, hasColonEffort := cliproxyauth.ResolveOpenAICompatColonEffortModel(e.cfg, auth, req.Model)
+	if hasColonEffort {
+		baseModel = colonBaseModel
+	}
 
 	reporter := helps.NewExecutorUsageReporter(ctx, e, baseModel, auth)
 	defer reporter.TrackFailure(ctx, &err)
@@ -329,6 +340,9 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	translated, err = thinking.ApplyThinking(translated, req.Model, from.String(), to.String(), e.Identifier())
 	if err != nil {
 		return nil, err
+	}
+	if hasColonEffort {
+		translated, _ = sjson.SetBytes(translated, "reasoning_effort", colonEffort)
 	}
 
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
@@ -621,6 +635,10 @@ func (e *OpenAICompatExecutor) executeImagesStream(ctx context.Context, auth *cl
 
 func (e *OpenAICompatExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
+	colonBaseModel, colonEffort, hasColonEffort := cliproxyauth.ResolveOpenAICompatColonEffortModel(e.cfg, auth, req.Model)
+	if hasColonEffort {
+		baseModel = colonBaseModel
+	}
 
 	from := opts.SourceFormat
 	responseFormat := cliproxyexecutor.ResponseFormatOrSource(opts)
@@ -632,6 +650,9 @@ func (e *OpenAICompatExecutor) CountTokens(ctx context.Context, auth *cliproxyau
 	translated, err := thinking.ApplyThinking(translated, req.Model, from.String(), to.String(), e.Identifier())
 	if err != nil {
 		return cliproxyexecutor.Response{}, err
+	}
+	if hasColonEffort {
+		translated, _ = sjson.SetBytes(translated, "reasoning_effort", colonEffort)
 	}
 
 	enc, err := helps.TokenizerForModel(modelForCounting)

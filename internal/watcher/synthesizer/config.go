@@ -284,6 +284,9 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 			if compat.ResponsesCompaction {
 				attrs["responses_compaction"] = "true"
 			}
+			if compat.ForceBalance {
+				attrs["force_balance"] = "true"
+			}
 			a := &coreauth.Auth{
 				ID:         id,
 				Provider:   internalProviderKey,
@@ -331,6 +334,9 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 			}
 			if compat.ResponsesCompaction {
 				attrs["responses_compaction"] = "true"
+			}
+			if compat.ForceBalance {
+				attrs["force_balance"] = "true"
 			}
 			a := &coreauth.Auth{
 				ID:         id,

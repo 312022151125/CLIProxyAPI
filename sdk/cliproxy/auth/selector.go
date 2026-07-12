@@ -34,6 +34,36 @@ type RoundRobinSelector struct {
 // rolling-window subscription caps (e.g. chat message limits).
 type FillFirstSelector struct{}
 
+// forceBalanceRR is shared by FillFirst force-balance paths so successive
+// requests keep a stable round-robin cursor even when the global selector is FillFirst.
+var forceBalanceRR = &RoundRobinSelector{}
+
+func authForceBalance(auth *Auth) bool {
+	if auth == nil || len(auth.Attributes) == 0 {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(auth.Attributes["force_balance"]), "true")
+}
+
+// allAuthsForceBalance reports whether every non-nil auth in the slice is force-balanced.
+// Empty slice returns false.
+func allAuthsForceBalance(auths []*Auth) bool {
+	if len(auths) == 0 {
+		return false
+	}
+	saw := false
+	for _, a := range auths {
+		if a == nil {
+			continue
+		}
+		saw = true
+		if !authForceBalance(a) {
+			return false
+		}
+	}
+	return saw
+}
+
 type blockReason int
 
 const (
@@ -299,6 +329,10 @@ func (s *FillFirstSelector) Pick(ctx context.Context, provider, model string, op
 		return nil, err
 	}
 	available = preferCodexWebsocketAuths(ctx, provider, available)
+	if allAuthsForceBalance(available) {
+		// Force multi-key RR even when global strategy is fill-first.
+		return forceBalanceRR.Pick(ctx, provider, model, opts, available)
+	}
 	return available[0], nil
 }
 
@@ -426,6 +460,11 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 	available, err := getAvailableAuths(auths, provider, model, now)
 	if err != nil {
 		return nil, err
+	}
+
+	if allAuthsForceBalance(available) {
+		entry.Debugf("session-affinity: force-balance keys, skipping sticky | provider=%s model=%s", provider, model)
+		return s.fallback.Pick(ctx, provider, model, opts, auths)
 	}
 
 	cacheKey := provider + "::" + primaryID + "::" + model

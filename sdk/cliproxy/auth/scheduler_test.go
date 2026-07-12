@@ -148,6 +148,62 @@ func TestSchedulerPick_FillFirstSticksToFirstReady(t *testing.T) {
 	}
 }
 
+func TestSchedulerPick_FillFirstForceBalanceRoundsRobin(t *testing.T) {
+	t.Parallel()
+
+	forceAttrs := map[string]string{"force_balance": "true"}
+	scheduler := newSchedulerForTest(
+		&FillFirstSelector{},
+		&Auth{ID: "b", Provider: "gemini", Attributes: forceAttrs},
+		&Auth{ID: "a", Provider: "gemini", Attributes: forceAttrs},
+		&Auth{ID: "c", Provider: "gemini", Attributes: forceAttrs},
+	)
+
+	// Without force-balance fill-first always returns sorted first ("a").
+	// With override, ready view RR should cycle a,b,c.
+	want := []string{"a", "b", "c"}
+	for index, wantID := range want {
+		got, errPick := scheduler.pickSingle(context.Background(), "gemini", "", cliproxyexecutor.Options{}, nil)
+		if errPick != nil {
+			t.Fatalf("pickSingle() #%d error = %v", index, errPick)
+		}
+		if got == nil {
+			t.Fatalf("pickSingle() #%d auth = nil", index)
+		}
+		if got.ID != wantID {
+			t.Fatalf("pickSingle() #%d auth.ID = %q, want %q", index, got.ID, wantID)
+		}
+	}
+}
+
+func TestSchedulerPick_FillFirstForceBalancePinWins(t *testing.T) {
+	t.Parallel()
+
+	forceAttrs := map[string]string{"force_balance": "true"}
+	scheduler := newSchedulerForTest(
+		&FillFirstSelector{},
+		&Auth{ID: "b", Provider: "gemini", Attributes: forceAttrs},
+		&Auth{ID: "a", Provider: "gemini", Attributes: forceAttrs},
+		&Auth{ID: "c", Provider: "gemini", Attributes: forceAttrs},
+	)
+
+	opts := cliproxyexecutor.Options{
+		Metadata: map[string]any{cliproxyexecutor.PinnedAuthMetadataKey: "c"},
+	}
+	for index := 0; index < 3; index++ {
+		got, errPick := scheduler.pickSingle(context.Background(), "gemini", "", opts, nil)
+		if errPick != nil {
+			t.Fatalf("pickSingle() #%d error = %v", index, errPick)
+		}
+		if got == nil {
+			t.Fatalf("pickSingle() #%d auth = nil", index)
+		}
+		if got.ID != "c" {
+			t.Fatalf("pickSingle() #%d auth.ID = %q, want pinned %q", index, got.ID, "c")
+		}
+	}
+}
+
 func TestSchedulerPick_PromotesExpiredCooldownBeforePick(t *testing.T) {
 	t.Parallel()
 

@@ -43,6 +43,7 @@ type openAICompatibilityWithAuthIndex struct {
 	Models               []config.OpenAICompatibilityModel        `json:"models,omitempty"`
 	Headers              map[string]string                        `json:"headers,omitempty"`
 	DisableCooling       bool                                     `json:"disable-cooling,omitempty"`
+	ForceBalance         bool                                     `json:"force-balance,omitempty"`
 	ResponsesPassthrough bool                                     `json:"responses-passthrough,omitempty"`
 	ResponsesWebsocket   bool                                     `json:"responses-websocket,omitempty"`
 	ResponsesCompaction  bool                                     `json:"responses-compaction,omitempty"`
@@ -255,6 +256,7 @@ func (h *Handler) openAICompatibilityWithAuthIndex() []openAICompatibilityWithAu
 			Models:               entry.Models,
 			Headers:              entry.Headers,
 			DisableCooling:       entry.DisableCooling,
+			ForceBalance:         entry.ForceBalance,
 			ResponsesPassthrough: entry.ResponsesPassthrough,
 			ResponsesWebsocket:   entry.ResponsesWebsocket,
 			ResponsesCompaction:  entry.ResponsesCompaction,

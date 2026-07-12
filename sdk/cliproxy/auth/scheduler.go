@@ -789,7 +789,11 @@ func (m *modelScheduler) pickReadyAtPriorityLocked(preferWebsocket bool, priorit
 		view = &bucket.ws
 	}
 	var picked *scheduledAuth
-	if strategy == schedulerStrategyFillFirst {
+	useFillFirst := strategy == schedulerStrategyFillFirst
+	if useFillFirst && allScheduledForceBalance(view.flat, predicate) {
+		useFillFirst = false
+	}
+	if useFillFirst {
 		picked = view.pickFirst(predicate)
 	} else {
 		picked = view.pickRoundRobin(predicate)
@@ -942,6 +946,23 @@ func buildReadyBucket(entries []*scheduledAuth) *readyBucket {
 // buildReadyView creates a flat view for rotation.
 func buildReadyView(entries []*scheduledAuth) readyView {
 	return readyView{flat: append([]*scheduledAuth(nil), entries...)}
+}
+
+func allScheduledForceBalance(entries []*scheduledAuth, predicate func(*scheduledAuth) bool) bool {
+	saw := false
+	for _, e := range entries {
+		if e == nil || e.auth == nil {
+			continue
+		}
+		if predicate != nil && !predicate(e) {
+			continue
+		}
+		saw = true
+		if !authForceBalance(e.auth) {
+			return false
+		}
+	}
+	return saw
 }
 
 // pickFirst returns the first ready entry that satisfies predicate without advancing cursors.

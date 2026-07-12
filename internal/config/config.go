@@ -644,6 +644,11 @@ type OpenAICompatibility struct {
 	// DisableCooling disables auth/model cooldown scheduling for this provider when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
 
+	// ForceBalance, when true, forces round-robin across this provider's ready API keys,
+	// ignoring global routing.strategy=fill-first and routing.session-affinity sticky binding
+	// for credentials synthesized from this entry.
+	ForceBalance bool `yaml:"force-balance,omitempty" json:"force-balance,omitempty"`
+
 	// ResponsesPassthrough when true forwards POST /v1/responses directly to upstream /responses
 	// without converting to Chat Completions format.
 	ResponsesPassthrough bool `yaml:"responses-passthrough,omitempty" json:"responses-passthrough,omitempty"`

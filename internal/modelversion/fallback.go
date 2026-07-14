@@ -20,6 +20,14 @@ var (
 	minimaxMFamily    = regexp.MustCompile(`^minimax-m(\d+)(?:\.(\d+))?$`)
 )
 
+// gpt56CodenameFallback maps GPT-5.6 codenames to their first registered
+// downgrade target. After this hop, normal gpt-5 family rank logic applies.
+var gpt56CodenameFallback = map[string]string{
+	"gpt-5.6-terra": "gpt-5.4",
+	"gpt-5.6-sol":   "gpt-5.5",
+	"gpt-5.6-luna":  "gpt-5.4-mini",
+}
+
 type familyRank struct {
 	key  string
 	rank int64
@@ -33,11 +41,27 @@ func Next(requested string, providers []string) string {
 	if base == "" {
 		return ""
 	}
+
+	var candidates []string
+	if mapped, ok := gpt56CodenameFallback[base]; ok {
+		candidates = registeredCandidates(providers)
+		for _, id := range candidates {
+			candBase := stripTrailingDateRevision(strings.ToLower(strings.TrimSpace(id)))
+			if candBase == mapped {
+				return withThinkingSuffix(id, parsed)
+			}
+		}
+		// Mapped target not registered — continue as if requested mapped base.
+		base = mapped
+	}
+
 	baseFamily, ok := familyRankForBase(base)
 	if !ok {
 		return ""
 	}
-	candidates := registeredCandidates(providers)
+	if candidates == nil {
+		candidates = registeredCandidates(providers)
+	}
 	var bestID string
 	var bestRank int64 = -1
 	for _, id := range candidates {

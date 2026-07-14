@@ -51,6 +51,11 @@ func TestNextFallbackModel(t *testing.T) {
 		{"kimi-k2.7(high)", "kimi-k2.6(high)"},
 		{"kimi-k2.5", ""},
 		{"gpt-5.5", "gpt-5.4"},
+		{"gpt-5.6-terra", "gpt-5.4"},
+		{"gpt-5.6-sol", "gpt-5.5"},
+		{"gpt-5.6-luna", "gpt-5.4-mini"},
+		{"gpt-5.6-terra(high)", "gpt-5.4(high)"},
+		{"gpt-5.6-sol-20260101", "gpt-5.5"},
 	}
 
 	for _, tt := range tests {
@@ -160,5 +165,59 @@ func TestNextRespectsProviderFilter(t *testing.T) {
 	got = Next("gpt-5.5", []string{"codex", "openai"})
 	if got != "gpt-5.4" {
 		t.Fatalf("Next with both providers = %q, want gpt-5.4", got)
+	}
+}
+
+func TestNextGPT56CodenameFallback(t *testing.T) {
+	t.Run("mapped missing continues normal rank", func(t *testing.T) {
+		registerTestModels(t, "gpt56-codename-terra-mini", "openai", "gpt-5.4-mini")
+		if got := Next("gpt-5.6-terra", nil); got != "gpt-5.4-mini" {
+			t.Fatalf("Next(gpt-5.6-terra) = %q, want gpt-5.4-mini", got)
+		}
+	})
+	t.Run("nothing usable returns empty", func(t *testing.T) {
+		registerTestModels(t, "gpt56-codename-empty", "openai", "claude-opus-4-6")
+		if got := Next("gpt-5.6-terra", nil); got != "" {
+			t.Fatalf("Next(gpt-5.6-terra) = %q, want empty", got)
+		}
+	})
+}
+
+func TestChainGPT56Codename(t *testing.T) {
+	tests := []struct {
+		name      string
+		client    string
+		models    []string
+		request   string
+		wantChain []string
+	}{
+		{
+			name:      "sol then gpt family",
+			client:    "chain-gpt56-sol",
+			models:    []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.5"},
+			request:   "gpt-5.6-sol",
+			wantChain: []string{"gpt-5.5", "gpt-5.4", "gpt-5.4-mini"},
+		},
+		{
+			name:      "terra then gpt family",
+			client:    "chain-gpt56-terra",
+			models:    []string{"gpt-5.4", "gpt-5.4-mini"},
+			request:   "gpt-5.6-terra",
+			wantChain: []string{"gpt-5.4", "gpt-5.4-mini"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registerTestModels(t, tt.client, "openai", tt.models...)
+			got := Chain(tt.request, nil)
+			if len(got) != len(tt.wantChain) {
+				t.Fatalf("Chain(%q) = %v, want %v", tt.request, got, tt.wantChain)
+			}
+			for i := range tt.wantChain {
+				if got[i] != tt.wantChain[i] {
+					t.Fatalf("chain[%d] = %q, want %q", i, got[i], tt.wantChain[i])
+				}
+			}
+		})
 	}
 }

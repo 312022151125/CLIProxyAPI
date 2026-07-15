@@ -31,6 +31,10 @@ const ServiceTierMetadataKey = "service_tier"
 // Missing or true means generation is enabled; only an explicit false disables generation.
 const GenerateMetadataKey = "generate"
 
+// CodexFallbackDisplayModelMetadataKey stores the original model name to display in responses
+// when a Codex model fallback downgrade is applied.
+const CodexFallbackDisplayModelMetadataKey = "codex_fallback_display_model"
+
 const (
 	// PinnedAuthMetadataKey locks execution to a specific auth ID.
 	PinnedAuthMetadataKey = "pinned_auth_id"

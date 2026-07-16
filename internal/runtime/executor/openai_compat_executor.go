@@ -194,7 +194,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		b, _ := io.ReadAll(httpResp.Body)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
-		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		err = openAICompatStatusErr(httpResp.StatusCode, string(b))
 		return resp, err
 	}
 	body, err := io.ReadAll(httpResp.Body)
@@ -204,8 +204,12 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	}
 	helps.AppendAPIResponseChunk(ctx, e.cfg, body)
 	if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, body); bodyErr != nil {
-		helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
-		return resp, bodyErr
+		var returnedErr error = bodyErr
+		if bodyErr.StatusCode() == http.StatusTooManyRequests {
+			returnedErr = openAICompatStatusErr(bodyErr.StatusCode(), bodyErr.Error())
+		}
+		helps.RecordAPIResponseError(ctx, e.cfg, returnedErr)
+		return resp, returnedErr
 	}
 	reporter.Publish(ctx, helps.ParseOpenAIUsage(body))
 	// Ensure we at least record the request even if upstream doesn't return usage
@@ -296,7 +300,7 @@ func (e *OpenAICompatExecutor) executeImages(ctx context.Context, auth *cliproxy
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), body))
-		err = statusErr{code: httpResp.StatusCode, msg: string(body)}
+		err = openAICompatStatusErr(httpResp.StatusCode, string(body))
 		return resp, err
 	}
 
@@ -420,7 +424,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
 		}
-		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		err = openAICompatStatusErr(httpResp.StatusCode, string(b))
 		return nil, err
 	}
 	out := make(chan cliproxyexecutor.StreamChunk)
@@ -464,9 +468,9 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 					continue
 				}
 				if bytes.HasPrefix(trimmedLine, []byte("{")) || bytes.HasPrefix(trimmedLine, []byte("[")) {
-					streamErr := statusErr{code: http.StatusBadGateway, msg: string(trimmedLine)}
+					streamErr := openAICompatStatusErr(http.StatusBadGateway, string(trimmedLine))
 					if bodyErr := helps.DetectUpstreamErrorBody(http.StatusOK, trimmedLine); bodyErr != nil {
-						streamErr = statusErr{code: bodyErr.StatusCode(), msg: bodyErr.Error()}
+						streamErr = openAICompatStatusErr(bodyErr.StatusCode(), bodyErr.Error())
 					}
 					helps.RecordAPIResponseError(ctx, e.cfg, streamErr)
 					reporter.PublishFailure(ctx, streamErr)
@@ -593,7 +597,7 @@ func (e *OpenAICompatExecutor) executeImagesStream(ctx context.Context, auth *cl
 		}
 		helps.AppendAPIResponseChunk(ctx, e.cfg, body)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), body))
-		return nil, statusErr{code: httpResp.StatusCode, msg: string(body)}
+		return nil, openAICompatStatusErr(httpResp.StatusCode, string(body))
 	}
 
 	out := make(chan cliproxyexecutor.StreamChunk)
@@ -947,6 +951,16 @@ func (e *OpenAICompatExecutor) overrideModel(payload []byte, model string) []byt
 	}
 	payload, _ = sjson.SetBytes(payload, "model", model)
 	return payload
+}
+
+func openAICompatStatusErr(code int, msg string) statusErr {
+	err := statusErr{code: code, msg: msg}
+	if code == http.StatusTooManyRequests {
+		if retryAfter, parseErr := helps.ParseRetryDelay([]byte(msg)); parseErr == nil && retryAfter != nil {
+			err.retryAfter = retryAfter
+		}
+	}
+	return err
 }
 
 type statusErr struct {

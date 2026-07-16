@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
@@ -127,8 +128,11 @@ func (e *openAICompatPoolExecutor) StreamModels() []string {
 type authScopedOpenAICompatPoolExecutor struct {
 	id string
 
-	mu           sync.Mutex
-	executeCalls []string
+	mu            sync.Mutex
+	executeCalls  []string
+	streamCalls   []string
+	executeErrors map[string]error
+	streamErrors  map[string]error
 }
 
 func (e *authScopedOpenAICompatPoolExecutor) Identifier() string { return e.id }
@@ -137,12 +141,28 @@ func (e *authScopedOpenAICompatPoolExecutor) Execute(_ context.Context, auth *Au
 	call := auth.ID + "|" + req.Model
 	e.mu.Lock()
 	e.executeCalls = append(e.executeCalls, call)
+	err := e.executeErrors[auth.ID]
 	e.mu.Unlock()
+	if err != nil {
+		return cliproxyexecutor.Response{}, err
+	}
 	return cliproxyexecutor.Response{Payload: []byte(call)}, nil
 }
 
-func (e *authScopedOpenAICompatPoolExecutor) ExecuteStream(context.Context, *Auth, cliproxyexecutor.Request, cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
-	return nil, &Error{HTTPStatus: http.StatusNotImplemented, Message: "ExecuteStream not implemented"}
+func (e *authScopedOpenAICompatPoolExecutor) ExecuteStream(_ context.Context, auth *Auth, req cliproxyexecutor.Request, _ cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
+	call := auth.ID + "|" + req.Model
+	e.mu.Lock()
+	e.streamCalls = append(e.streamCalls, call)
+	err := e.streamErrors[auth.ID]
+	e.mu.Unlock()
+	ch := make(chan cliproxyexecutor.StreamChunk, 1)
+	if err != nil {
+		ch <- cliproxyexecutor.StreamChunk{Err: err}
+	} else {
+		ch <- cliproxyexecutor.StreamChunk{Payload: []byte(call)}
+	}
+	close(ch)
+	return &cliproxyexecutor.StreamResult{Headers: http.Header{"X-Auth": {auth.ID}}, Chunks: ch}, nil
 }
 
 func (e *authScopedOpenAICompatPoolExecutor) Refresh(_ context.Context, auth *Auth) (*Auth, error) {
@@ -162,6 +182,14 @@ func (e *authScopedOpenAICompatPoolExecutor) ExecuteCalls() []string {
 	defer e.mu.Unlock()
 	out := make([]string, len(e.executeCalls))
 	copy(out, e.executeCalls)
+	return out
+}
+
+func (e *authScopedOpenAICompatPoolExecutor) StreamCalls() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]string, len(e.streamCalls))
+	copy(out, e.streamCalls)
 	return out
 }
 
@@ -835,5 +863,102 @@ func TestManagerExecuteStream_OpenAICompatAliasPoolStopsOnInvalidBootstrap(t *te
 	}
 	if got := executor.StreamModels(); len(got) != 1 || got[0] != "deepseek-v3.1" {
 		t.Fatalf("stream calls = %v, want only first upstream model", got)
+	}
+}
+func newTwoAuthOpenAICompatPoolManager(t *testing.T, executor *authScopedOpenAICompatPoolExecutor) (*Manager, *Auth, *Auth) {
+	t.Helper()
+	alias := "claude-opus-4.66"
+	m := NewManager(nil, nil, nil)
+	m.SetConfig(&internalconfig.Config{OpenAICompatibility: []internalconfig.OpenAICompatibility{{
+		Name:   "pool",
+		Models: []internalconfig.OpenAICompatibilityModel{{Name: "deepseek-v3.1", Alias: alias}},
+	}}})
+	m.SetRetryConfig(0, 0, 1)
+	m.RegisterExecutor(executor)
+
+	badAuth := &Auth{ID: "aa-429-" + t.Name(), Provider: openAICompatPoolProviderKey, Status: StatusActive, Attributes: map[string]string{
+		"api_key": "bad-key", "compat_name": "pool", "provider_key": openAICompatPoolProviderKey,
+	}}
+	goodAuth := &Auth{ID: "bb-good-" + t.Name(), Provider: openAICompatPoolProviderKey, Status: StatusActive, Attributes: map[string]string{
+		"api_key": "good-key", "compat_name": "pool", "provider_key": openAICompatPoolProviderKey,
+	}}
+	for _, auth := range []*Auth{badAuth, goodAuth} {
+		if _, err := m.Register(context.Background(), auth); err != nil {
+			t.Fatalf("register auth %s: %v", auth.ID, err)
+		}
+	}
+	reg := registry.GetGlobalRegistry()
+	for _, auth := range []*Auth{badAuth, goodAuth} {
+		reg.RegisterClient(auth.ID, openAICompatPoolProviderKey, []*registry.ModelInfo{{ID: alias}})
+		authID := auth.ID
+		t.Cleanup(func() { reg.UnregisterClient(authID) })
+	}
+	return m, badAuth, goodAuth
+}
+
+func TestManagerExecute_OpenAICompat429RotatesPastCredentialLimit(t *testing.T) {
+	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, executeErrors: map[string]error{}}
+	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor)
+	executor.executeErrors[badAuth.ID] = &Error{HTTPStatus: http.StatusTooManyRequests, Message: "bad key rate limited"}
+
+	resp, err := m.Execute(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: "claude-opus-4.66"}, cliproxyexecutor.Options{})
+	if err != nil {
+		t.Fatalf("execute error = %v, want fallback success", err)
+	}
+	if !strings.HasPrefix(string(resp.Payload), goodAuth.ID+"|") {
+		t.Fatalf("payload = %q, want auth %q", string(resp.Payload), goodAuth.ID)
+	}
+	got := executor.ExecuteCalls()
+	if len(got) != 2 || !strings.HasPrefix(got[0], badAuth.ID+"|") || !strings.HasPrefix(got[1], goodAuth.ID+"|") {
+		t.Fatalf("execute calls = %v, want one call per auth in order", got)
+	}
+}
+
+func TestManagerExecuteStream_OpenAICompat429RotatesPastCredentialLimit(t *testing.T) {
+	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, streamErrors: map[string]error{}}
+	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor)
+	executor.streamErrors[badAuth.ID] = &Error{HTTPStatus: http.StatusTooManyRequests, Message: "bad key rate limited"}
+
+	streamResult, err := m.ExecuteStream(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: "claude-opus-4.66"}, cliproxyexecutor.Options{})
+	if err != nil {
+		t.Fatalf("execute stream error = %v, want fallback success", err)
+	}
+	if got := readOpenAICompatStreamPayload(t, streamResult); !strings.HasPrefix(got, goodAuth.ID+"|") {
+		t.Fatalf("stream payload = %q, want auth %q", got, goodAuth.ID)
+	}
+	got := executor.StreamCalls()
+	if len(got) != 2 || !strings.HasPrefix(got[0], badAuth.ID+"|") || !strings.HasPrefix(got[1], goodAuth.ID+"|") {
+		t.Fatalf("stream calls = %v, want one call per auth in order", got)
+	}
+}
+
+func TestManagerExecute_OpenAICompat429AllKeysReturnsFinalErrorWithoutWaiting(t *testing.T) {
+	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, executeErrors: map[string]error{}}
+	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor)
+	m.SetRetryConfig(1, 30*time.Second, 1)
+	badErr := &retryAfterStatusError{status: http.StatusTooManyRequests, message: "bad key rate limited", retryAfter: 10 * time.Second}
+	goodErr := &retryAfterStatusError{status: http.StatusTooManyRequests, message: "good key rate limited", retryAfter: 10 * time.Second}
+	executor.executeErrors[badAuth.ID] = badErr
+	executor.executeErrors[goodAuth.ID] = goodErr
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := m.Execute(ctx, []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: "claude-opus-4.66"}, cliproxyexecutor.Options{})
+	if err == nil {
+		t.Fatal("expected final upstream rate-limit error")
+	}
+	if err == context.DeadlineExceeded || strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
+		t.Fatalf("error = %v, want final upstream error without cooldown wait", err)
+	}
+	if statusCodeFromError(err) != http.StatusTooManyRequests || err.Error() != goodErr.Error() {
+		t.Fatalf("error = %v, want final error %v", err, goodErr)
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("execute elapsed = %v, want no request-level cooldown sleep", elapsed)
+	}
+	got := executor.ExecuteCalls()
+	if len(got) != 2 || !strings.HasPrefix(got[0], badAuth.ID+"|") || !strings.HasPrefix(got[1], goodAuth.ID+"|") {
+		t.Fatalf("execute calls = %v, want every key exactly once", got)
 	}
 }

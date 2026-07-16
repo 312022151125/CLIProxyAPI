@@ -1023,6 +1023,51 @@ func isOpenAICompatAPIKeyAuth(auth *Auth) bool {
 	}
 	return strings.TrimSpace(auth.Attributes["compat_name"]) != ""
 }
+func (m *Manager) openAICompatProvidersWithUntriedAuth(providers []string, tried map[string]struct{}) []string {
+	if m == nil || len(providers) == 0 {
+		return nil
+	}
+	providerSet := make(map[string]struct{}, len(providers))
+	for _, provider := range providers {
+		providerKey := strings.TrimSpace(strings.ToLower(provider))
+		if providerKey != "" {
+			providerSet[providerKey] = struct{}{}
+		}
+	}
+	if len(providerSet) == 0 {
+		return nil
+	}
+	found := make(map[string]struct{}, len(providerSet))
+	m.mu.RLock()
+	for _, auth := range m.auths {
+		if auth == nil || auth.Disabled || !isOpenAICompatAPIKeyAuth(auth) {
+			continue
+		}
+		if _, used := tried[auth.ID]; used {
+			continue
+		}
+		providerKey := executorKeyFromAuth(auth)
+		if _, ok := providerSet[providerKey]; ok {
+			found[providerKey] = struct{}{}
+		}
+	}
+	m.mu.RUnlock()
+	if len(found) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(found))
+	added := make(map[string]struct{}, len(found))
+	for _, provider := range providers {
+		providerKey := strings.TrimSpace(strings.ToLower(provider))
+		if _, ok := found[providerKey]; ok {
+			if _, exists := added[providerKey]; !exists {
+				out = append(out, provider)
+				added[providerKey] = struct{}{}
+			}
+		}
+	}
+	return out
+}
 
 func openAICompatProviderKey(auth *Auth) string {
 	if auth == nil {
@@ -1998,6 +2043,9 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 				result.RetryAfter = retryAfterFromError(bootstrapErr)
 				m.MarkResult(ctx, result)
 				discardStreamChunks(streamResult.Chunks)
+				if strings.EqualFold(provider, "codex") && isContextWindowExceededError(bootstrapErr) {
+					return nil, newStreamBootstrapError(bootstrapErr, streamResult.Headers)
+				}
 				return nil, bootstrapErr
 			}
 			if idx < len(execModels)-1 {
@@ -2415,7 +2463,7 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 		return resp, nil
 	}
 	if hasCodexProvider(normalized) {
-		if fbResp, ok := m.tryCodexModelFallbackExecute(ctx, normalized, req, opts); ok {
+		if fbResp, ok := m.tryCodexModelFallbackExecute(ctx, normalized, req, opts, lastErr); ok {
 			return fbResp, nil
 		}
 	}
@@ -2475,7 +2523,7 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 		return result, nil
 	}
 	if hasCodexProvider(normalized) {
-		if fbResult, ok := m.tryCodexModelFallbackExecuteStream(ctx, normalized, req, opts); ok {
+		if fbResult, ok := m.tryCodexModelFallbackExecuteStream(ctx, normalized, req, opts, lastErr); ok {
 			return fbResult, nil
 		}
 	}
@@ -2493,6 +2541,32 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 	return nil, lastErr
 }
 
+type mixedRetryPassExhaustedError struct {
+	cause error
+}
+
+func (e *mixedRetryPassExhaustedError) Error() string {
+	if e == nil || e.cause == nil {
+		return ""
+	}
+	return e.cause.Error()
+}
+
+func (e *mixedRetryPassExhaustedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func unwrapMixedRetryPassExhausted(err error) (error, bool) {
+	var exhausted *mixedRetryPassExhaustedError
+	if !errors.As(err, &exhausted) || exhausted == nil {
+		return nil, false
+	}
+	return exhausted.cause, true
+}
+
 // runMixedRetry runs the full retry cycle for a non-streaming execution.
 // It returns the first successful response, or the last error if all attempts fail.
 func (m *Manager) runMixedRetry(ctx context.Context, normalized []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
@@ -2503,6 +2577,9 @@ func (m *Manager) runMixedRetry(ctx context.Context, normalized []string, req cl
 		resp, errExec := m.executeMixedOnce(ctx, normalized, req, opts, maxRetryCredentials)
 		if errExec == nil {
 			return resp, nil
+		}
+		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errExec); ok {
+			return cliproxyexecutor.Response{}, exhaustedErr
 		}
 		lastErr = errExec
 		wait, shouldRetry := m.shouldRetryAfterError(errExec, attempt, normalized, retryModel, maxWait)
@@ -2530,6 +2607,9 @@ func (m *Manager) runStreamMixedRetry(ctx context.Context, normalized []string, 
 		if errStream == nil {
 			return result, nil
 		}
+		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errStream); ok {
+			return nil, exhaustedErr
+		}
 		lastErr = errStream
 		wait, shouldRetry := m.shouldRetryAfterError(errStream, attempt, normalized, retryModel, maxWait)
 		if !shouldRetry {
@@ -2546,10 +2626,6 @@ func (m *Manager) runStreamMixedRetry(ctx context.Context, normalized []string, 
 			} else if ok {
 				return result, nil
 			}
-		}
-		var bootstrapErr *streamBootstrapError
-		if errors.As(lastErr, &bootstrapErr) && bootstrapErr != nil {
-			return streamErrorResult(bootstrapErr.Headers(), bootstrapErr.cause), nil
 		}
 		return nil, lastErr
 	}
@@ -2659,19 +2735,33 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 	tried := make(map[string]struct{})
 	attempted := make(map[string]struct{})
 	var lastErr error
+	exhaustOpenAICompatKeys := false
 	for {
-		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials {
+		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials && (!exhaustOpenAICompatKeys || len(m.openAICompatProvidersWithUntriedAuth(providers, tried)) == 0) {
+			if exhaustOpenAICompatKeys && lastErr != nil {
+				return cliproxyexecutor.Response{}, &mixedRetryPassExhaustedError{cause: lastErr}
+			}
 			if lastErr != nil {
 				return cliproxyexecutor.Response{}, lastErr
 			}
 			return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 		}
+		pickProviders := providers
+		if exhaustOpenAICompatKeys {
+			pickProviders = m.openAICompatProvidersWithUntriedAuth(providers, tried)
+			if len(pickProviders) == 0 && lastErr != nil {
+				return cliproxyexecutor.Response{}, &mixedRetryPassExhaustedError{cause: lastErr}
+			}
+		}
 		pickOpts := opts
 		if homeMode {
 			pickOpts = withHomeAuthCount(opts, homeAuthCount)
 		}
-		auth, executor, provider, errPick := m.pickNextMixed(ctx, providers, routeModel, pickOpts, tried)
+		auth, executor, provider, errPick := m.pickNextMixed(ctx, pickProviders, routeModel, pickOpts, tried)
 		if errPick != nil {
+			if exhaustOpenAICompatKeys && lastErr != nil {
+				return cliproxyexecutor.Response{}, &mixedRetryPassExhaustedError{cause: lastErr}
+			}
 			if shouldReturnLastErrorOnPickFailure(homeMode, lastErr, errPick) {
 				return cliproxyexecutor.Response{}, lastErr
 			}
@@ -2737,6 +2827,9 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 					result.RetryAfter = ra
 				}
 				m.MarkResult(execCtx, result)
+				if isOpenAICompatAPIKeyAuth(auth) && statusCodeFromError(errExec) == http.StatusTooManyRequests {
+					exhaustOpenAICompatKeys = true
+				}
 				if isRequestInvalidError(errExec) {
 					return cliproxyexecutor.Response{}, errExec
 				}
@@ -2885,19 +2978,33 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 	tried := make(map[string]struct{})
 	attempted := make(map[string]struct{})
 	var lastErr error
+	exhaustOpenAICompatKeys := false
 	for {
-		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials {
+		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials && (!exhaustOpenAICompatKeys || len(m.openAICompatProvidersWithUntriedAuth(providers, tried)) == 0) {
+			if exhaustOpenAICompatKeys && lastErr != nil {
+				return nil, &mixedRetryPassExhaustedError{cause: lastErr}
+			}
 			if lastErr != nil {
 				return nil, lastErr
 			}
 			return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
 		}
+		pickProviders := providers
+		if exhaustOpenAICompatKeys {
+			pickProviders = m.openAICompatProvidersWithUntriedAuth(providers, tried)
+			if len(pickProviders) == 0 && lastErr != nil {
+				return nil, &mixedRetryPassExhaustedError{cause: lastErr}
+			}
+		}
 		pickOpts := opts
 		if homeMode {
 			pickOpts = withHomeAuthCount(opts, homeAuthCount)
 		}
-		auth, executor, provider, errPick := m.pickNextMixed(ctx, providers, routeModel, pickOpts, tried)
+		auth, executor, provider, errPick := m.pickNextMixed(ctx, pickProviders, routeModel, pickOpts, tried)
 		if errPick != nil {
+			if exhaustOpenAICompatKeys && lastErr != nil {
+				return nil, &mixedRetryPassExhaustedError{cause: lastErr}
+			}
 			if shouldReturnLastErrorOnPickFailure(homeMode, lastErr, errPick) {
 				return nil, lastErr
 			}
@@ -2941,6 +3048,9 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 				return nil, errStream
 			}
 			lastErr = errStream
+			if isOpenAICompatAPIKeyAuth(auth) && statusCodeFromError(errStream) == http.StatusTooManyRequests {
+				exhaustOpenAICompatKeys = true
+			}
 			if homeMode {
 				homeAuthCount++
 			}

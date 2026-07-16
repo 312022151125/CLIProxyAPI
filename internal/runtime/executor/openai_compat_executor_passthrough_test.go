@@ -7,14 +7,30 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
 	"github.com/tidwall/gjson"
 )
+
+func TestParseRetryDelay_RateLimitedUntil(t *testing.T) {
+	resetAt := time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339)
+	retryAfter, err := helps.ParseRetryDelay([]byte(`{"message":"rate limited until ` + resetAt + `"}`))
+	if err != nil {
+		t.Fatalf("helps.ParseRetryDelay() error = %v", err)
+	}
+	if retryAfter == nil {
+		t.Fatal("helps.ParseRetryDelay() returned nil")
+	}
+	if got := time.Now().Add(*retryAfter); got.Sub(time.Now().Add(5*time.Minute)) > time.Second || got.Sub(time.Now().Add(5*time.Minute)) < -time.Second {
+		t.Fatalf("retryAfter instant = %v, want near %v", got, time.Now().Add(5*time.Minute))
+	}
+}
 
 func TestOpenAICompatEndpointPathMapsExtraEndpoints(t *testing.T) {
 	t.Parallel()
@@ -208,4 +224,59 @@ func TestOpenAICompatExecutorUnsupportedColonEffortRemainsModelID(t *testing.T) 
 	if gjson.GetBytes(gotBody, "reasoning_effort").Exists() {
 		t.Fatalf("reasoning_effort unexpectedly set; body=%s", string(gotBody))
 	}
+}
+func TestOpenAICompatExecutor_ExecuteRateLimitedUntil(t *testing.T) {
+	resetAt := time.Now().Add(5 * time.Minute).UTC().Truncate(time.Second)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("rate limited until " + resetAt.Format(time.RFC3339)))
+	}))
+	defer server.Close()
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{"base_url": server.URL + "/v1", "api_key": "test"}}
+	_, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{Model: "compat-model", Payload: []byte(`{"model":"compat-model"}`)}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FromString("openai")})
+	assertOpenAICompatRetryAfterNear(t, err, resetAt)
+}
+
+func TestOpenAICompatExecutor_ExecuteStreamRateLimitedUntil(t *testing.T) {
+	resetAt := time.Now().Add(5 * time.Minute).UTC().Truncate(time.Second)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("rate limited until " + resetAt.Format(time.RFC3339)))
+	}))
+	defer server.Close()
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{"base_url": server.URL + "/v1", "api_key": "test"}}
+	_, err := executor.ExecuteStream(context.Background(), auth, cliproxyexecutor.Request{Model: "compat-model", Payload: []byte(`{"model":"compat-model","stream":true}`)}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FromString("openai"), Stream: true})
+	assertOpenAICompatRetryAfterNear(t, err, resetAt)
+}
+
+func assertOpenAICompatRetryAfterNear(t *testing.T, err error, resetAt time.Time) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected rate-limit error")
+	}
+	retryable, ok := err.(interface{ RetryAfter() *time.Duration })
+	if !ok || retryable.RetryAfter() == nil {
+		t.Fatalf("error = %#v, want RetryAfter", err)
+	}
+	got := time.Now().Add(*retryable.RetryAfter())
+	if delta := got.Sub(resetAt); delta > time.Second || delta < -time.Second {
+		t.Fatalf("retryAfter instant = %v, want near %v", got, resetAt)
+	}
+}
+
+func TestOpenAICompatExecutor_ExecuteRateLimitedEnvelopePreservesRetryAfter(t *testing.T) {
+	resetAt := time.Now().Add(5 * time.Minute).UTC().Truncate(time.Second)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"error":{"type":"rate_limit_exceeded","message":"rate limited until ` + resetAt.Format(time.RFC3339) + `"}}`))
+	}))
+	defer server.Close()
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{"base_url": server.URL + "/v1", "api_key": "test"}}
+	_, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{Model: "compat-model", Payload: []byte(`{"model":"compat-model"}`)}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FromString("openai")})
+	assertOpenAICompatRetryAfterNear(t, err, resetAt)
 }

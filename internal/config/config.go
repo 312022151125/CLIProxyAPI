@@ -97,6 +97,9 @@ type Config struct {
 	// MaxRetryCredentials defines the maximum number of credentials to try for a failed request.
 	// Set to 0 or a negative value to keep trying all available credentials (legacy behavior).
 	MaxRetryCredentials int `yaml:"max-retry-credentials" json:"max-retry-credentials"`
+	// OpenAICompat429KeyRotation enables one-pass OpenAI-compatible API-key rotation after HTTP 429 responses.
+	// Default false preserves the legacy credential retry behavior.
+	OpenAICompat429KeyRotation bool `yaml:"openai-compat-429-key-rotation" json:"openai-compat-429-key-rotation"`
 	// MaxRetryInterval defines the maximum wait time in seconds before retrying a cooled-down credential.
 	MaxRetryInterval int `yaml:"max-retry-interval" json:"max-retry-interval"`
 

@@ -865,14 +865,17 @@ func TestManagerExecuteStream_OpenAICompatAliasPoolStopsOnInvalidBootstrap(t *te
 		t.Fatalf("stream calls = %v, want only first upstream model", got)
 	}
 }
-func newTwoAuthOpenAICompatPoolManager(t *testing.T, executor *authScopedOpenAICompatPoolExecutor) (*Manager, *Auth, *Auth) {
+func newTwoAuthOpenAICompatPoolManager(t *testing.T, executor *authScopedOpenAICompatPoolExecutor, rotateOn429 bool) (*Manager, *Auth, *Auth) {
 	t.Helper()
 	alias := "claude-opus-4.66"
 	m := NewManager(nil, nil, nil)
-	m.SetConfig(&internalconfig.Config{OpenAICompatibility: []internalconfig.OpenAICompatibility{{
-		Name:   "pool",
-		Models: []internalconfig.OpenAICompatibilityModel{{Name: "deepseek-v3.1", Alias: alias}},
-	}}})
+	m.SetConfig(&internalconfig.Config{
+		OpenAICompat429KeyRotation: rotateOn429,
+		OpenAICompatibility: []internalconfig.OpenAICompatibility{{
+			Name:   "pool",
+			Models: []internalconfig.OpenAICompatibilityModel{{Name: "deepseek-v3.1", Alias: alias}},
+		}},
+	})
 	m.SetRetryConfig(0, 0, 1)
 	m.RegisterExecutor(executor)
 
@@ -898,7 +901,7 @@ func newTwoAuthOpenAICompatPoolManager(t *testing.T, executor *authScopedOpenAIC
 
 func TestManagerExecute_OpenAICompat429RotatesPastCredentialLimit(t *testing.T) {
 	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, executeErrors: map[string]error{}}
-	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor)
+	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
 	executor.executeErrors[badAuth.ID] = &Error{HTTPStatus: http.StatusTooManyRequests, Message: "bad key rate limited"}
 
 	resp, err := m.Execute(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: "claude-opus-4.66"}, cliproxyexecutor.Options{})
@@ -914,9 +917,23 @@ func TestManagerExecute_OpenAICompat429RotatesPastCredentialLimit(t *testing.T) 
 	}
 }
 
+func TestManagerExecute_OpenAICompat429FlagOffKeepsCredentialLimit(t *testing.T) {
+	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, executeErrors: map[string]error{}}
+	m, badAuth, _ := newTwoAuthOpenAICompatPoolManager(t, executor, false)
+	executor.executeErrors[badAuth.ID] = &Error{HTTPStatus: http.StatusTooManyRequests, Message: "bad key rate limited"}
+
+	_, err := m.Execute(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: "claude-opus-4.66"}, cliproxyexecutor.Options{})
+	if err == nil || statusCodeFromError(err) != http.StatusTooManyRequests {
+		t.Fatalf("execute error = %v, want legacy 429", err)
+	}
+	if got := executor.ExecuteCalls(); len(got) != 1 || !strings.HasPrefix(got[0], badAuth.ID+"|") {
+		t.Fatalf("execute calls = %v, want only limited credential", got)
+	}
+}
+
 func TestManagerExecuteStream_OpenAICompat429RotatesPastCredentialLimit(t *testing.T) {
 	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, streamErrors: map[string]error{}}
-	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor)
+	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
 	executor.streamErrors[badAuth.ID] = &Error{HTTPStatus: http.StatusTooManyRequests, Message: "bad key rate limited"}
 
 	streamResult, err := m.ExecuteStream(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: "claude-opus-4.66"}, cliproxyexecutor.Options{})
@@ -934,7 +951,7 @@ func TestManagerExecuteStream_OpenAICompat429RotatesPastCredentialLimit(t *testi
 
 func TestManagerExecute_OpenAICompat429AllKeysReturnsFinalErrorWithoutWaiting(t *testing.T) {
 	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, executeErrors: map[string]error{}}
-	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor)
+	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
 	m.SetRetryConfig(1, 30*time.Second, 1)
 	badErr := &retryAfterStatusError{status: http.StatusTooManyRequests, message: "bad key rate limited", retryAfter: 10 * time.Second}
 	goodErr := &retryAfterStatusError{status: http.StatusTooManyRequests, message: "good key rate limited", retryAfter: 10 * time.Second}

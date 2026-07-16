@@ -120,6 +120,10 @@ request-retry: 3
 # Set to 0 to keep legacy behavior (try all available credentials).
 max-retry-credentials: 0
 
+# When true, rotate across untried OpenAI-compatible API keys after HTTP 429 responses.
+# Default false preserves legacy credential retry behavior.
+openai-compat-429-key-rotation: false
+
 # Maximum wait time in seconds for a cooled-down credential before triggering a retry.
 max-retry-interval: 30
 

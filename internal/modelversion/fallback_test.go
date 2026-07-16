@@ -54,7 +54,7 @@ func TestNextFallbackModel(t *testing.T) {
 		{"gpt-5.5", "gpt-5.4"},
 		{"gpt-5.6-terra", "gpt-5.4"},
 		{"gpt-5.6-sol", "gpt-5.5"},
-		{"gpt-5.6-luna", "gpt-5.4-mini"},
+		{"gpt-5.6-luna", "gpt-5.4"},
 		{"gpt-5.6-terra(high)", "gpt-5.4(high)"},
 		{"gpt-5.6-sol-20260101", "gpt-5.5"},
 		{"grok-4.5", "grok-4.3"},

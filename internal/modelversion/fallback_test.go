@@ -25,6 +25,7 @@ func TestNextFallbackModel(t *testing.T) {
 		"glm-5", "glm-5.1", "glm-5.2",
 		"kimi-k2.5", "kimi-k2.6", "kimi-k2.7", "kimi-k2.7-code", "kimi-k2.7-code-highspeed",
 		"gpt-5.4", "gpt-5.4-mini", "gpt-5.5",
+		"grok-4.3", "grok-4.5",
 	)
 
 	tests := []struct {
@@ -56,6 +57,9 @@ func TestNextFallbackModel(t *testing.T) {
 		{"gpt-5.6-luna", "gpt-5.4-mini"},
 		{"gpt-5.6-terra(high)", "gpt-5.4(high)"},
 		{"gpt-5.6-sol-20260101", "gpt-5.5"},
+		{"grok-4.5", "grok-4.3"},
+		{"grok-4.5(high)", "grok-4.3(high)"},
+		{"grok-4.3", ""},
 	}
 
 	for _, tt := range tests {
@@ -109,6 +113,13 @@ func TestChainFullFamilies(t *testing.T) {
 			models:    []string{"claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8"},
 			request:   "claude-opus-4-8",
 			wantChain: []string{"claude-opus-4-7", "claude-opus-4-6"},
+		},
+		{
+			name:      "grok-4.5 to grok-4.3",
+			client:    "chain-grok",
+			models:    []string{"grok-4.3", "grok-4.5"},
+			request:   "grok-4.5",
+			wantChain: []string{"grok-4.3"},
 		},
 	}
 	for _, tt := range tests {

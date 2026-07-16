@@ -18,6 +18,8 @@ var (
 	kimiK2Family      = regexp.MustCompile(`^kimi-k2\.(\d+)(?:-code(?:-highspeed)?)?$`)
 	gpt5Family        = regexp.MustCompile(`^gpt-5(?:\.(\d+))?(?:-mini)?$`)
 	minimaxMFamily    = regexp.MustCompile(`^minimax-m(\d+)(?:\.(\d+))?$`)
+	// grok-4.5, grok-4.3 — not grok-4.20-*, grok-build-*, imagine, etc.
+	grokFamily = regexp.MustCompile(`^grok-(\d+)(?:\.(\d+))?$`)
 )
 
 // gpt56CodenameFallback maps GPT-5.6 codenames to their first registered
@@ -200,6 +202,15 @@ func familyRankForBase(base string) (familyRank, bool) {
 			minor = parseInt64(m[2])
 		}
 		return familyRank{key: "minimax-m", rank: major*1000 + minor}, true
+	}
+	if m := grokFamily.FindStringSubmatch(base); len(m) >= 2 {
+		major := parseInt64(m[1])
+		minor := int64(0)
+		if len(m) >= 3 && m[2] != "" {
+			minor = parseInt64(m[2])
+		}
+		// Same major only: grok-4.5 -> grok-4.3, not across majors.
+		return familyRank{key: "grok-" + m[1], rank: major*100 + minor*10}, true
 	}
 	return familyRank{}, false
 }

@@ -573,7 +573,7 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 	// we pay the sjson cost when fast-service-tier is enabled. It covers
 	// prompt cache injection and all prior processing for agent follow-ups.
 	body = applyCodexFastServiceTier(e.cfg, body)
-	upstreamBody, identityState = applyCodexIdentityConfuseBody(e.cfg, auth, userPayload, body)
+	upstreamBody, identityState = applyCodexIdentityConfuseBody(e.cfg, auth, originalPayloadSource, body)
 	wsReqBody := buildCodexWebsocketRequestBody(upstreamBody)
 	wsReqLog := helps.UpstreamRequestLog{
 		URL:       wsURL,

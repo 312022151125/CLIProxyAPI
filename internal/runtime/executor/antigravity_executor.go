@@ -57,6 +57,7 @@ const (
 	antigravityCreditsHintRefreshTimeout   = 5 * time.Second
 	antigravityShortQuotaCooldownThreshold = 5 * time.Minute
 	antigravityInstantRetryThreshold       = 3 * time.Second
+	antigravityCapacityExhaustedSentence   = "You have exhausted your capacity on this model"
 	// systemInstruction              = "You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.**Absolute paths only****Proactiveness**"
 )
 
@@ -76,6 +77,7 @@ const (
 	antigravity429SoftRateLimit                   antigravity429Category     = "soft_rate_limit"
 	antigravity429DecisionSoftRetry               antigravity429DecisionKind = "soft_retry"
 	antigravity429DecisionInstantRetrySameAuth    antigravity429DecisionKind = "instant_retry_same_auth"
+	antigravity429DecisionImmediateSwitchAuth     antigravity429DecisionKind = "immediate_switch_auth"
 	antigravity429DecisionShortCooldownSwitchAuth antigravity429DecisionKind = "short_cooldown_switch_auth"
 	antigravity429DecisionFullQuotaExhausted      antigravity429DecisionKind = "full_quota_exhausted"
 )
@@ -469,7 +471,7 @@ func injectEnabledCreditTypes(payload []byte) []byte {
 
 func classifyAntigravity429(body []byte) antigravity429Category {
 	switch decideAntigravity429(body).kind {
-	case antigravity429DecisionInstantRetrySameAuth, antigravity429DecisionShortCooldownSwitchAuth:
+	case antigravity429DecisionInstantRetrySameAuth, antigravity429DecisionImmediateSwitchAuth, antigravity429DecisionShortCooldownSwitchAuth:
 		return antigravity429RateLimited
 	case antigravity429DecisionFullQuotaExhausted:
 		return antigravity429QuotaExhausted
@@ -488,6 +490,10 @@ func decideAntigravity429(body []byte) antigravity429Decision {
 
 	if retryAfter, parseErr := helps.ParseRetryDelay(body); parseErr == nil && retryAfter != nil {
 		decision.retryAfter = retryAfter
+	}
+	if strings.Contains(string(body), antigravityCapacityExhaustedSentence) {
+		decision.kind = antigravity429DecisionImmediateSwitchAuth
+		return decision
 	}
 
 	status := strings.TrimSpace(gjson.GetBytes(body, "error.status").String())
@@ -735,6 +741,9 @@ attemptLoop:
 			if httpResp.StatusCode == http.StatusTooManyRequests {
 				decision := decideAntigravity429(bodyBytes)
 				switch decision.kind {
+				case antigravity429DecisionImmediateSwitchAuth:
+					err = newAntigravityStatusErr(httpResp.StatusCode, bodyBytes)
+					return resp, err
 				case antigravity429DecisionInstantRetrySameAuth:
 					if attempt+1 < attempts {
 						if decision.retryAfter != nil && *decision.retryAfter > 0 {
@@ -967,6 +976,9 @@ attemptLoop:
 					decision := decideAntigravity429(bodyBytes)
 
 					switch decision.kind {
+					case antigravity429DecisionImmediateSwitchAuth:
+						err = newAntigravityStatusErr(httpResp.StatusCode, bodyBytes)
+						return resp, err
 					case antigravity429DecisionInstantRetrySameAuth:
 						if attempt+1 < attempts {
 							if decision.retryAfter != nil && *decision.retryAfter > 0 {
@@ -1446,6 +1458,9 @@ attemptLoop:
 					decision := decideAntigravity429(bodyBytes)
 
 					switch decision.kind {
+					case antigravity429DecisionImmediateSwitchAuth:
+						err = newAntigravityStatusErr(httpResp.StatusCode, bodyBytes)
+						return nil, err
 					case antigravity429DecisionInstantRetrySameAuth:
 						if attempt+1 < attempts {
 							if decision.retryAfter != nil && *decision.retryAfter > 0 {

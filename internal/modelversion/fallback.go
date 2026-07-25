@@ -13,7 +13,7 @@ const maxFallbackChainSteps = 16
 var dateRevisionSuffix = regexp.MustCompile(`-20\d{6}$`)
 
 var (
-	claudeMinorFamily = regexp.MustCompile(`^claude-(opus|sonnet)-(\d+)-(\d+)$`)
+	claudeMinorFamily = regexp.MustCompile(`^claude-(opus|sonnet)-(\d+)(?:-(\d+))?$`)
 	glm5Family        = regexp.MustCompile(`^glm-5(?:\.(\d+))?$`)
 	kimiK2Family      = regexp.MustCompile(`^kimi-k2\.(\d+)(?:-code(?:-highspeed)?)?$`)
 	gpt5Family        = regexp.MustCompile(`^gpt-5(?:\.(\d+))?(?:-mini)?$`)
@@ -161,11 +161,14 @@ func providerIntersects(modelProviders []string, want map[string]struct{}) bool 
 }
 
 func familyRankForBase(base string) (familyRank, bool) {
-	if m := claudeMinorFamily.FindStringSubmatch(base); len(m) == 4 {
+	if m := claudeMinorFamily.FindStringSubmatch(base); len(m) >= 3 {
 		major := parseInt64(m[2])
-		minor := parseInt64(m[3])
+		minor := int64(0)
+		if len(m) >= 4 && m[3] != "" {
+			minor = parseInt64(m[3])
+		}
 		return familyRank{
-			key:  "claude-" + m[1] + "-" + m[2],
+			key:  "claude-" + m[1],
 			rank: major*100 + minor,
 		}, true
 	}

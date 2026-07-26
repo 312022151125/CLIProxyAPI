@@ -170,7 +170,37 @@ func (h *BaseAPIHandler) executeStreamWithAuthManager(ctx context.Context, handl
 	return h.executeStreamWithAuthManagerFormats(ctx, handlerType, handlerType, modelName, rawJSON, alt, allowImageModel, modelExecutionOptions{})
 }
 
+// executeStreamWithAuthManagerFormats resolves the route and provider set once, then runs
+// the streaming execution through the model version fallback chain.
 func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context, entryProtocol, exitProtocol, modelName string, rawJSON []byte, alt string, allowImageModel bool, execOptions modelExecutionOptions) (<-chan []byte, http.Header, <-chan *interfaces.ErrorMessage) {
+	originalRequestedModel := modelName
+	routeDecision, preparedRoute := preparedModelRouteFromContext(ctx)
+	if !preparedRoute {
+		routeDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, true, execOptions)
+	}
+	responseProtocol := modelExecutionResponseProtocol(entryProtocol, exitProtocol)
+	if errMsg := validateNativeInteractionsExecution(entryProtocol, execOptions, routeDecision); errMsg != nil {
+		errChan := make(chan *interfaces.ErrorMessage, 1)
+		errChan <- errMsg
+		close(errChan)
+		return nil, nil, errChan
+	}
+	if routeDecision.ExecutorPluginID != "" {
+		return h.streamWithPluginExecutor(ctx, entryProtocol, responseProtocol, modelName, originalRequestedModel, rawJSON, alt, routeDecision.ExecutorPluginID, execOptions)
+	}
+	providers, _, errMsg := h.providersForExecution(modelName, originalRequestedModel, allowImageModel, routeDecision, execOptions)
+	if errMsg != nil {
+		errChan := make(chan *interfaces.ErrorMessage, 1)
+		errChan <- errMsg
+		close(errChan)
+		return nil, nil, errChan
+	}
+	return h.executeStreamWithAuthManagerFormatsWithVersionFallback(ctx, entryProtocol, exitProtocol, modelName, rawJSON, alt, allowImageModel, execOptions, providers)
+}
+
+// executeStreamWithAuthManagerFormatsOnce performs a single streaming execution attempt
+// without the model version fallback chain.
+func (h *BaseAPIHandler) executeStreamWithAuthManagerFormatsOnce(ctx context.Context, entryProtocol, exitProtocol, modelName string, rawJSON []byte, alt string, allowImageModel bool, execOptions modelExecutionOptions) (<-chan []byte, http.Header, <-chan *interfaces.ErrorMessage) {
 	originalRequestedModel := modelName
 	routeDecision, preparedRoute := preparedModelRouteFromContext(ctx)
 	if !preparedRoute {
@@ -198,6 +228,9 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = originalRequestedModel
 	addAuthSelectionModelMetadata(reqMeta, execOptions.AuthSelectionModel)
 	addModelExecutionSourceMetadata(reqMeta, execOptions.InternalSource)
+	if execOptions.RequestPath != "" {
+		reqMeta[coreexecutor.RequestPathMetadataKey] = execOptions.RequestPath
+	}
 	setReasoningEffortMetadata(reqMeta, entryProtocol, normalizedModel, rawJSON)
 	setServiceTierMetadata(reqMeta, rawJSON)
 	setGenerateMetadata(reqMeta, rawJSON)
@@ -218,6 +251,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 		ResponseFormat:              sdktranslator.FromString(responseProtocol),
 		Headers:                     modelExecutionHeaders(ctx, execOptions.Headers),
 		Query:                       modelExecutionQuery(ctx, execOptions.Query),
+		Method:                      execOptions.Method,
 		RequestAfterAuthInterceptor: h.requestAfterAuthInterceptor(afterAuthCapture, execOptions.SkipInterceptorPluginID),
 	}
 	opts.Metadata = reqMeta

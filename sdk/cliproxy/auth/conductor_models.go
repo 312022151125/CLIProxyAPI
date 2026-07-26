@@ -147,6 +147,15 @@ func (m *Manager) resolveOpenAICompatUpstreamModelPool(auth *Auth, requestedMode
 	if entry == nil {
 		return nil
 	}
+	// A "model:effort" request resolves through the alias pool on the base model,
+	// then carries the reasoning effort back onto every upstream candidate.
+	if baseModel, effort, ok := ResolveOpenAICompatColonEffortModel(cfg, auth, requestedModel); ok {
+		pool := resolveModelAliasPoolFromConfigModels(baseModel, asModelAliasEntries(entry.Models))
+		for i := range pool {
+			pool[i] = strings.TrimSpace(pool[i]) + ":" + effort
+		}
+		return pool
+	}
 	return resolveModelAliasPoolFromConfigModels(requestedModel, asModelAliasEntries(entry.Models))
 }
 
@@ -180,6 +189,12 @@ func (m *Manager) selectionModelForAuth(auth *Auth, routeModel string) string {
 	requestedModel := rewriteModelForAuth(routeModel, auth)
 	if strings.TrimSpace(requestedModel) == "" {
 		requestedModel = strings.TrimSpace(routeModel)
+	}
+	if isOpenAICompatAPIKeyAuth(auth) {
+		cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
+		if baseModel, _, ok := ResolveOpenAICompatColonEffortModel(cfg, auth, requestedModel); ok {
+			requestedModel = baseModel
+		}
 	}
 	resolvedModel := m.applyOAuthModelAlias(auth, requestedModel)
 	if strings.TrimSpace(resolvedModel) == "" {

@@ -74,6 +74,11 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 	reporter.SetTranslatedReasoningEffort(body, to.String())
 
 	url := strings.TrimSuffix(baseURL, "/") + "/responses"
+	// Inject service_tier=priority at the very last moment before sending.
+	// This is the only place we do the JSON work when fast-service-tier is enabled,
+	// guaranteeing it survives all prior processing (payload rules, thinking,
+	// prompt cache injection, etc.) while avoiding double work on every request.
+	body = applyCodexFastServiceTier(e.cfg, body)
 	var identityState codexIdentityConfuseState
 	httpReq, upstreamBody, identityState, err := e.cacheHelper(ctx, from, url, auth, req, originalPayloadSource, body, opts.Headers)
 	if err != nil {
@@ -120,9 +125,29 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 		}
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
+		if isCodexTokenInvalidatedResponse(httpResp.StatusCode, b) && auth != nil {
+			retryResp, retryAuth, retryIdentityState, retried, retryErr := e.retryAfterCodexTokenInvalidated(ctx, auth, from, "/responses", req, originalPayloadSource, body, httpClient, httpResp)
+			if retryErr != nil {
+				return resp, retryErr
+			}
+			if retried {
+				auth = retryAuth
+				httpResp = retryResp
+				identityState = retryIdentityState
+				if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
+					goto codexReadExecuteResponse
+				}
+				b, _ = io.ReadAll(httpResp.Body)
+				b = applyCodexIdentityConfuseResponsePayload(b, identityState)
+				helps.AppendAPIResponseChunk(ctx, e.cfg, b)
+				helps.LogWithRequestID(ctx).Debugf("request error after refresh retry, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
+			}
+		}
 		err = newCodexStatusErr(httpResp.StatusCode, b)
 		return resp, err
 	}
+
+codexReadExecuteResponse:
 	data, errRead := io.ReadAll(httpResp.Body)
 	upstreamData := applyCodexIdentityConfuseResponsePayload(data, identityState)
 	helps.AppendAPIResponseChunk(ctx, e.cfg, upstreamData)
@@ -231,6 +256,7 @@ func (e *CodexExecutor) executeCompact(ctx context.Context, auth *cliproxyauth.A
 	reporter.SetTranslatedReasoningEffort(body, to.String())
 
 	url := strings.TrimSuffix(baseURL, "/") + "/responses/compact"
+	body = applyCodexFastServiceTier(e.cfg, body)
 	var identityState codexIdentityConfuseState
 	httpReq, upstreamBody, identityState, err := e.cacheHelper(ctx, from, url, auth, req, originalPayloadSource, body, opts.Headers)
 	if err != nil {
@@ -274,9 +300,29 @@ func (e *CodexExecutor) executeCompact(ctx context.Context, auth *cliproxyauth.A
 		b = applyCodexIdentityConfuseResponsePayload(b, identityState)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
+		if isCodexTokenInvalidatedResponse(httpResp.StatusCode, b) && auth != nil {
+			retryResp, retryAuth, retryIdentityState, retried, retryErr := e.retryAfterCodexTokenInvalidated(ctx, auth, from, "/responses/compact", req, originalPayloadSource, body, httpClient, httpResp)
+			if retryErr != nil {
+				return resp, retryErr
+			}
+			if retried {
+				auth = retryAuth
+				httpResp = retryResp
+				identityState = retryIdentityState
+				if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
+					goto codexReadCompactResponse
+				}
+				b, _ = io.ReadAll(httpResp.Body)
+				b = applyCodexIdentityConfuseResponsePayload(b, identityState)
+				helps.AppendAPIResponseChunk(ctx, e.cfg, b)
+				helps.LogWithRequestID(ctx).Debugf("request error after refresh retry, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
+			}
+		}
 		err = newCodexStatusErr(httpResp.StatusCode, b)
 		return resp, err
 	}
+
+codexReadCompactResponse:
 	data, err := io.ReadAll(httpResp.Body)
 	if err != nil {
 		helps.RecordAPIResponseError(ctx, e.cfg, err)

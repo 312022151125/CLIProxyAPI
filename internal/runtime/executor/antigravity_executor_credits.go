@@ -39,6 +39,7 @@ const (
 	antigravity429SoftRateLimit                   antigravity429Category     = "soft_rate_limit"
 	antigravity429DecisionSoftRetry               antigravity429DecisionKind = "soft_retry"
 	antigravity429DecisionInstantRetrySameAuth    antigravity429DecisionKind = "instant_retry_same_auth"
+	antigravity429DecisionImmediateSwitchAuth     antigravity429DecisionKind = "immediate_switch_auth"
 	antigravity429DecisionShortCooldownSwitchAuth antigravity429DecisionKind = "short_cooldown_switch_auth"
 	antigravity429DecisionFullQuotaExhausted      antigravity429DecisionKind = "full_quota_exhausted"
 )
@@ -202,7 +203,7 @@ func injectEnabledCreditTypes(payload []byte) []byte {
 
 func classifyAntigravity429(body []byte) antigravity429Category {
 	switch decideAntigravity429(body).kind {
-	case antigravity429DecisionInstantRetrySameAuth, antigravity429DecisionShortCooldownSwitchAuth:
+	case antigravity429DecisionInstantRetrySameAuth, antigravity429DecisionImmediateSwitchAuth, antigravity429DecisionShortCooldownSwitchAuth:
 		return antigravity429RateLimited
 	case antigravity429DecisionFullQuotaExhausted:
 		return antigravity429QuotaExhausted
@@ -221,6 +222,13 @@ func decideAntigravity429(body []byte) antigravity429Decision {
 
 	if retryAfter, parseErr := helps.ParseRetryDelay(body); parseErr == nil && retryAfter != nil {
 		decision.retryAfter = retryAfter
+	}
+
+	// Capacity exhaustion on this model never recovers within the retry window,
+	// so switch credentials immediately instead of retrying the same auth.
+	if strings.Contains(string(body), antigravityCapacityExhaustedSentence) {
+		decision.kind = antigravity429DecisionImmediateSwitchAuth
+		return decision
 	}
 
 	status := strings.TrimSpace(gjson.GetBytes(body, "error.status").String())

@@ -74,6 +74,9 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 	reporter.SetTranslatedReasoningEffort(body, to.String())
 
 	url := strings.TrimSuffix(baseURL, "/") + "/responses"
+	// Inject service_tier=priority at the very last moment before sending, so it
+	// survives all prior payload processing.
+	body = applyCodexFastServiceTier(e.cfg, body)
 	var identityState codexIdentityConfuseState
 	httpReq, upstreamBody, identityState, err := e.cacheHelper(ctx, from, url, auth, req, originalPayloadSource, body, opts.Headers)
 	if err != nil {
@@ -123,9 +126,34 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 		}
 		helps.AppendAPIResponseChunk(ctx, e.cfg, data)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
+		if isCodexTokenInvalidatedResponse(httpResp.StatusCode, data) && auth != nil {
+			// The response body was already drained and closed above, so hand the
+			// helper a nil response to avoid a double close.
+			retryResp, retryAuth, retryIdentityState, retried, retryErr := e.retryAfterCodexTokenInvalidated(ctx, auth, from, "/responses", req, originalPayloadSource, body, httpClient, nil)
+			if retryErr != nil {
+				return nil, retryErr
+			}
+			if retried {
+				auth = retryAuth
+				httpResp = retryResp
+				identityState = retryIdentityState
+				if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
+					goto codexStartStream
+				}
+				data, _ = io.ReadAll(httpResp.Body)
+				if errClose := httpResp.Body.Close(); errClose != nil {
+					log.Errorf("codex executor: close response body error: %v", errClose)
+				}
+				data = applyCodexIdentityConfuseResponsePayload(data, identityState)
+				helps.AppendAPIResponseChunk(ctx, e.cfg, data)
+				helps.LogWithRequestID(ctx).Debugf("request error after refresh retry, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
+			}
+		}
 		err = newCodexStatusErr(httpResp.StatusCode, data)
 		return nil, err
 	}
+
+codexStartStream:
 	out := make(chan cliproxyexecutor.StreamChunk)
 	go func() {
 		defer close(out)

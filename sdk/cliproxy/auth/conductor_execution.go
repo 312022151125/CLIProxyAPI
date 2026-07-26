@@ -32,35 +32,23 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 		return m.executeHome(ctx, normalized, req, opts, false)
 	}
 
-	_, maxRetryCredentials, maxWait := m.retrySettings()
-
-	var lastErr error
-	retryModel := authSelectionModelFromOptions(opts, req.Model)
-	for attempt := 0; ; attempt++ {
-		resp, errExec := m.executeMixedOnce(ctx, normalized, req, opts, maxRetryCredentials)
-		if errExec == nil {
-			return resp, nil
-		}
-		lastErr = errExec
-		wait, shouldRetry := m.shouldRetryAfterError(errExec, attempt, normalized, retryModel, maxWait)
-		if !shouldRetry {
-			break
-		}
-		if errWait := waitForCooldown(ctx, wait, maxWait); errWait != nil {
-			return cliproxyexecutor.Response{}, errWait
+	resp, lastErr := m.runMixedRetry(ctx, normalized, req, opts)
+	if lastErr == nil {
+		return resp, nil
+	}
+	if hasCodexProvider(normalized) {
+		if fbResp, ok := m.tryCodexModelFallbackExecute(ctx, normalized, req, opts, lastErr); ok {
+			return fbResp, nil
 		}
 	}
-	if lastErr != nil {
-		if hasAntigravityProvider(normalized) && shouldAttemptAntigravityCreditsFallback(m, lastErr, normalized) {
-			if resp, ok, errCredits := m.tryAntigravityCreditsExecute(ctx, req, opts); errCredits != nil {
-				return cliproxyexecutor.Response{}, errCredits
-			} else if ok {
-				return resp, nil
-			}
+	if hasAntigravityProvider(normalized) && shouldAttemptAntigravityCreditsFallback(m, lastErr, normalized) {
+		if fbResp, ok, errCredits := m.tryAntigravityCreditsExecute(ctx, req, opts); errCredits != nil {
+			return cliproxyexecutor.Response{}, errCredits
+		} else if ok {
+			return fbResp, nil
 		}
-		return cliproxyexecutor.Response{}, lastErr
 	}
-	return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
+	return cliproxyexecutor.Response{}, lastErr
 }
 
 // It supports multiple providers for the same model and round-robins the starting provider per model.
@@ -112,39 +100,27 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 		return nil, &Error{Code: "provider_not_found", Message: "no provider supplied"}
 	}
 
-	_, maxRetryCredentials, maxWait := m.retrySettings()
-
-	var lastErr error
-	retryModel := authSelectionModelFromOptions(opts, req.Model)
-	for attempt := 0; ; attempt++ {
-		result, errStream := m.executeStreamMixedOnce(ctx, normalized, req, opts, maxRetryCredentials)
-		if errStream == nil {
-			return result, nil
-		}
-		lastErr = errStream
-		wait, shouldRetry := m.shouldRetryAfterError(errStream, attempt, normalized, retryModel, maxWait)
-		if !shouldRetry {
-			break
-		}
-		if errWait := waitForCooldown(ctx, wait, maxWait); errWait != nil {
-			return nil, errWait
+	result, lastErr := m.runStreamMixedRetry(ctx, normalized, req, opts)
+	if lastErr == nil {
+		return result, nil
+	}
+	if hasCodexProvider(normalized) {
+		if fbResult, ok := m.tryCodexModelFallbackExecuteStream(ctx, normalized, req, opts, lastErr); ok {
+			return fbResult, nil
 		}
 	}
-	if lastErr != nil {
-		if hasAntigravityProvider(normalized) && shouldAttemptAntigravityCreditsFallback(m, lastErr, normalized) {
-			if result, ok, errCredits := m.tryAntigravityCreditsExecuteStream(ctx, req, opts); errCredits != nil {
-				return nil, errCredits
-			} else if ok {
-				return result, nil
-			}
+	if hasAntigravityProvider(normalized) && shouldAttemptAntigravityCreditsFallback(m, lastErr, normalized) {
+		if fbResult, ok, errCredits := m.tryAntigravityCreditsExecuteStream(ctx, req, opts); errCredits != nil {
+			return nil, errCredits
+		} else if ok {
+			return fbResult, nil
 		}
-		var bootstrapErr *streamBootstrapError
-		if errors.As(lastErr, &bootstrapErr) && bootstrapErr != nil {
-			return streamErrorResult(bootstrapErr.Headers(), bootstrapErr.cause), nil
-		}
-		return nil, lastErr
 	}
-	return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
+	var bootstrapErr *streamBootstrapError
+	if errors.As(lastErr, &bootstrapErr) && bootstrapErr != nil {
+		return streamErrorResult(bootstrapErr.Headers(), bootstrapErr.cause), nil
+	}
+	return nil, lastErr
 }
 
 type requestToFormatResolver interface {
@@ -250,19 +226,34 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 	tried := make(map[string]struct{})
 	attempted := make(map[string]struct{})
 	var lastErr error
+	rotateOn429 := m.openAICompat429KeyRotationEnabled()
+	exhaustOpenAICompatKeys := false
 	for {
-		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials {
+		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials && (!rotateOn429 || !exhaustOpenAICompatKeys || len(m.openAICompatProvidersWithUntriedAuth(providers, tried)) == 0) {
+			if rotateOn429 && exhaustOpenAICompatKeys && lastErr != nil {
+				return cliproxyexecutor.Response{}, &mixedRetryPassExhaustedError{cause: lastErr}
+			}
 			if lastErr != nil {
 				return cliproxyexecutor.Response{}, lastErr
 			}
 			return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 		}
+		pickProviders := providers
+		if rotateOn429 && exhaustOpenAICompatKeys {
+			pickProviders = m.openAICompatProvidersWithUntriedAuth(providers, tried)
+			if len(pickProviders) == 0 && lastErr != nil {
+				return cliproxyexecutor.Response{}, &mixedRetryPassExhaustedError{cause: lastErr}
+			}
+		}
 		pickOpts := opts
 		if homeMode {
 			pickOpts = withHomeAuthCount(opts, homeAuthCount)
 		}
-		auth, executor, provider, errPick := m.pickNextMixed(ctx, providers, routeModel, pickOpts, tried)
+		auth, executor, provider, errPick := m.pickNextMixed(ctx, pickProviders, routeModel, pickOpts, tried)
 		if errPick != nil {
+			if rotateOn429 && exhaustOpenAICompatKeys && lastErr != nil {
+				return cliproxyexecutor.Response{}, &mixedRetryPassExhaustedError{cause: lastErr}
+			}
 			if shouldReturnLastErrorOnPickFailure(homeMode, lastErr, errPick) {
 				return cliproxyexecutor.Response{}, lastErr
 			}
@@ -328,6 +319,9 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 					result.RetryAfter = ra
 				}
 				m.MarkResult(execCtx, result)
+				if rotateOn429 && isOpenAICompatAPIKeyAuth(auth) && statusCodeFromError(errExec) == http.StatusTooManyRequests {
+					exhaustOpenAICompatKeys = true
+				}
 				if isRequestInvalidError(errExec) {
 					return cliproxyexecutor.Response{}, errExec
 				}
@@ -485,12 +479,24 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 	tried := make(map[string]struct{})
 	attempted := make(map[string]struct{})
 	var lastErr error
+	rotateOn429 := m.openAICompat429KeyRotationEnabled()
+	exhaustOpenAICompatKeys := false
 	for {
-		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials {
+		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials && (!rotateOn429 || !exhaustOpenAICompatKeys || len(m.openAICompatProvidersWithUntriedAuth(providers, tried)) == 0) {
+			if rotateOn429 && exhaustOpenAICompatKeys && lastErr != nil {
+				return nil, &mixedRetryPassExhaustedError{cause: lastErr}
+			}
 			if lastErr != nil {
 				return nil, lastErr
 			}
 			return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
+		}
+		pickProviders := providers
+		if rotateOn429 && exhaustOpenAICompatKeys {
+			pickProviders = m.openAICompatProvidersWithUntriedAuth(providers, tried)
+			if len(pickProviders) == 0 && lastErr != nil {
+				return nil, &mixedRetryPassExhaustedError{cause: lastErr}
+			}
 		}
 		pickOpts := opts
 		if homeMode {
@@ -513,6 +519,9 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 			auth, executor, provider, errPick = m.pickNextMixed(ctx, providers, routeModel, pickOpts, tried)
 		}
 		if errPick != nil {
+			if rotateOn429 && exhaustOpenAICompatKeys && lastErr != nil {
+				return nil, &mixedRetryPassExhaustedError{cause: lastErr}
+			}
 			if shouldReturnLastErrorOnPickFailure(homeMode, lastErr, errPick) {
 				return nil, lastErr
 			}
@@ -614,6 +623,9 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 				return nil, errStream
 			}
 			lastErr = errStream
+			if rotateOn429 && isOpenAICompatAPIKeyAuth(auth) && statusCodeFromError(errStream) == http.StatusTooManyRequests {
+				exhaustOpenAICompatKeys = true
+			}
 			if homeMode {
 				homeAuthCount++
 			}

@@ -158,6 +158,9 @@ attemptLoop:
 					decision := decideAntigravity429(bodyBytes)
 
 					switch decision.kind {
+					case antigravity429DecisionImmediateSwitchAuth:
+						err = newAntigravityStatusErr(httpResp.StatusCode, bodyBytes)
+						return nil, err
 					case antigravity429DecisionInstantRetrySameAuth:
 						if attempt+1 < attempts {
 							if decision.retryAfter != nil && *decision.retryAfter > 0 {

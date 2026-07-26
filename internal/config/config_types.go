@@ -530,6 +530,21 @@ type OpenAICompatibility struct {
 
 	// DisableCooling disables auth/model cooldown scheduling for this provider when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
+
+	// ForceBalance, when true, forces round-robin across this provider's ready API keys,
+	// ignoring global routing.strategy=fill-first and routing.session-affinity sticky binding
+	// for credentials synthesized from this entry.
+	ForceBalance bool `yaml:"force-balance,omitempty" json:"force-balance,omitempty"`
+
+	// ResponsesPassthrough when true forwards POST /v1/responses directly to upstream /responses
+	// without converting to Chat Completions format.
+	ResponsesPassthrough bool `yaml:"responses-passthrough,omitempty" json:"responses-passthrough,omitempty"`
+
+	// ResponsesWebsocket when true indicates the upstream supports websocket-style Responses session semantics.
+	ResponsesWebsocket bool `yaml:"responses-websocket,omitempty" json:"responses-websocket,omitempty"`
+
+	// ResponsesCompaction when true enables POST /v1/responses/compact passthrough and websocket compaction replay bypass.
+	ResponsesCompaction bool `yaml:"responses-compaction,omitempty" json:"responses-compaction,omitempty"`
 }
 
 // OpenAICompatibilityAPIKey represents an API key configuration with optional proxy setting.

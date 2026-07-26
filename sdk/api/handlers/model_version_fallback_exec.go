@@ -38,7 +38,6 @@ func (h *BaseAPIHandler) shouldAttemptRoutingModelVersionFallback(errMsg *interf
 	return true
 }
 
-
 // modelversionFallbackState tracks the lazily-snapshotted downgrade chain for
 // a single fallback sequence. The chain is computed at most once, on the
 // first hop that actually needs to fall back, so a first-hop success never

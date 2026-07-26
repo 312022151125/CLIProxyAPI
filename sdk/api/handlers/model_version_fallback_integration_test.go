@@ -175,3 +175,66 @@ func TestExecuteWithAuthManagerFormats_VersionFallbackMinimaxChain(t *testing.T)
 		t.Fatalf("attempts = %v want %v", attempts, want)
 	}
 }
+
+// TestExecuteStreamWithAuthManagerFormats_VersionFallbackFirstHopSuccess proves
+// the fast path: when the first hop succeeds, the handler must not consult
+// modelversion.Chain, must not spawn the chunk-rewrite wrapper goroutine, and
+// must hand back the executor's own dataChan/errChan untouched — full payload,
+// clean errChan, same model as requested (no restore rewrite needed).
+func TestExecuteStreamWithAuthManagerFormats_VersionFallbackFirstHopSuccess(t *testing.T) {
+	const (
+		model    = "glm-5.2-stream-first-hop"
+		clientID = "version-fallback-stream-first-hop"
+		provider = "openai-compat-glm-stream"
+	)
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(clientID, provider, []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() { reg.UnregisterClient(clientID) })
+
+	var attempts int
+	executor := &interceptorCaptureExecutor{provider: provider}
+	executor.stream = func(ctx context.Context, auth *coreauth.Auth, req coreexecutor.Request, opts coreexecutor.Options) (*coreexecutor.StreamResult, error) {
+		attempts++
+		chunks := make(chan coreexecutor.StreamChunk, 2)
+		chunks <- coreexecutor.StreamChunk{Payload: []byte(fmt.Sprintf(`{"model":%q,"chunk":1}`, model))}
+		chunks <- coreexecutor.StreamChunk{Payload: []byte(fmt.Sprintf(`{"model":%q,"chunk":2}`, model))}
+		close(chunks)
+		return &coreexecutor.StreamResult{Chunks: chunks}, nil
+	}
+
+	manager := coreauth.NewManager(nil, nil, nil)
+	manager.RegisterExecutor(executor)
+	auth := &coreauth.Auth{ID: clientID, Provider: provider, Status: coreauth.StatusActive}
+	if _, err := manager.Register(context.Background(), auth); err != nil {
+		t.Fatalf("Register(): %v", err)
+	}
+
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, manager)
+	handler.SetQuotaExceededBehavior(internalconfig.QuotaExceeded{SwitchPreviewModel: true})
+
+	dataChan, _, errChan := handler.executeStreamWithAuthManagerFormats(
+		context.Background(), "openai", "openai", model,
+		[]byte(fmt.Sprintf(`{"model":%q}`, model)), "", false, modelExecutionOptions{},
+	)
+	if dataChan == nil {
+		t.Fatalf("dataChan = nil, want non-nil on first-hop success")
+	}
+
+	var got []byte
+	for chunk := range dataChan {
+		got = append(got, chunk...)
+	}
+	for msg := range errChan {
+		if msg != nil {
+			t.Fatalf("errChan emitted %+v, want clean close on first-hop success", msg)
+		}
+	}
+
+	want := fmt.Sprintf(`{"model":%q,"chunk":1}`, model) + fmt.Sprintf(`{"model":%q,"chunk":2}`, model)
+	if string(got) != want {
+		t.Fatalf("payload = %q, want %q (full payload, no rewrite)", string(got), want)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 (no fallback hop on first-hop success)", attempts)
+	}
+}

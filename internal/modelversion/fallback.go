@@ -38,15 +38,19 @@ type familyRank struct {
 // Next returns the next lower registered model in the same family, or "" if none.
 // providers limits candidates to models served by at least one of these providers (empty = any registered).
 func Next(requested string, providers []string) string {
+	return nextWithCandidates(requested, registeredCandidates(providers))
+}
+
+// nextWithCandidates is the hot-path ranking logic. It performs no registry
+// access — candidates must be a pre-snapshotted list of registered model IDs.
+func nextWithCandidates(requested string, candidates []string) string {
 	parsed := thinking.ParseSuffix(requested)
 	base := stripTrailingDateRevision(strings.ToLower(strings.TrimSpace(parsed.ModelName)))
 	if base == "" {
 		return ""
 	}
 
-	var candidates []string
 	if mapped, ok := gpt56CodenameFallback[base]; ok {
-		candidates = registeredCandidates(providers)
 		for _, id := range candidates {
 			candBase := stripTrailingDateRevision(strings.ToLower(strings.TrimSpace(id)))
 			if candBase == mapped {
@@ -60,9 +64,6 @@ func Next(requested string, providers []string) string {
 	baseFamily, ok := familyRankForBase(base)
 	if !ok {
 		return ""
-	}
-	if candidates == nil {
-		candidates = registeredCandidates(providers)
 	}
 	var bestID string
 	var bestRank int64 = -1
@@ -88,10 +89,17 @@ func Next(requested string, providers []string) string {
 
 // Chain returns ordered downgrade steps after requested (each passes registry availability).
 func Chain(requested string, providers []string) []string {
+	return chainWithCandidates(requested, registeredCandidates(providers))
+}
+
+// chainWithCandidates walks nextWithCandidates repeatedly against a single
+// pre-snapshotted candidate list, so a multi-hop fallback sequence performs
+// exactly one registry scan instead of one per hop.
+func chainWithCandidates(requested string, candidates []string) []string {
 	current := requested
 	out := make([]string, 0, 4)
 	for range maxFallbackChainSteps {
-		next := Next(current, providers)
+		next := nextWithCandidates(current, candidates)
 		if next == "" {
 			break
 		}

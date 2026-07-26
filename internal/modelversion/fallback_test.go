@@ -253,3 +253,43 @@ func TestChainGPT56Codename(t *testing.T) {
 		})
 	}
 }
+
+func TestChainWithCandidatesPreservesFallbackOrder(t *testing.T) {
+	got := chainWithCandidates("glm-5.2", []string{"glm-5", "glm-5.1", "glm-5.2"})
+	want := []string{"glm-5.1", "glm-5"}
+	if len(got) != len(want) {
+		t.Fatalf("chainWithCandidates() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("chain[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestChainWithCandidatesUsesSuppliedSnapshot proves the hot loop walks the
+// supplied candidate snapshot only — it must never consult the global
+// registry. These GLM ids use unrealistically high minor versions so they
+// cannot collide with any concurrently registered test client; they are
+// passed directly to chainWithCandidates and never registered anywhere. A
+// registry-backed implementation would see zero matching candidates and
+// return an empty chain, so a non-empty correct-order result proves the
+// snapshot is used.
+func TestChainWithCandidatesUsesSuppliedSnapshot(t *testing.T) {
+	candidates := []string{"glm-5.97", "glm-5.98", "glm-5.99"}
+	for _, id := range candidates {
+		if reg := registry.GetGlobalRegistry(); reg.GetModelCount(id) != 0 {
+			t.Fatalf("precondition: %q must not be globally registered", id)
+		}
+	}
+	got := chainWithCandidates("glm-5.99", candidates)
+	want := []string{"glm-5.98", "glm-5.97"}
+	if len(got) != len(want) {
+		t.Fatalf("chainWithCandidates() = %v, want %v (must use supplied snapshot, not registry)", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("chain[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}

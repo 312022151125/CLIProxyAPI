@@ -38,8 +38,31 @@ func (h *BaseAPIHandler) shouldAttemptRoutingModelVersionFallback(errMsg *interf
 	return true
 }
 
-func nextFallbackModel(requested string, providers []string) string {
-	return modelversion.Next(requested, providers)
+
+// modelversionFallbackState tracks the lazily-snapshotted downgrade chain for
+// a single fallback sequence. The chain is computed at most once, on the
+// first hop that actually needs to fall back, so a first-hop success never
+// touches modelversion.Chain at all.
+type modelversionFallbackState struct {
+	chain []string
+	index int
+	ready bool
+}
+
+// next returns the next model to try, snapshotting the chain via
+// modelversion.Chain exactly once (on first use). Returns "" once the chain
+// is exhausted, matching the previous per-hop Next() exhaustion behavior.
+func (s *modelversionFallbackState) next(requested string, providers []string) string {
+	if !s.ready {
+		s.chain = modelversion.Chain(requested, providers)
+		s.ready = true
+	}
+	if s.index >= len(s.chain) {
+		return ""
+	}
+	next := s.chain[s.index]
+	s.index++
+	return next
 }
 
 func (h *BaseAPIHandler) executeWithAuthManagerFormatsWithVersionFallback(
@@ -51,19 +74,23 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormatsWithVersionFallback(
 	currentModel := modelName
 	currentPayload := rawJSON
 	var lastErr *interfaces.ErrorMessage
+	var fallback modelversionFallbackState
 
 	for range maxVersionFallbackHops {
 		body, headers, errMsg := h.executeWithAuthManagerFormatsOnce(
 			ctx, entryProtocol, exitProtocol, currentModel, currentPayload, alt, allowImageModel, execOptions,
 		)
 		if errMsg == nil {
+			if currentModel == originalRequestedModel {
+				return body, headers, nil
+			}
 			return restoreOriginalModelInBody(body, originalRequestedModel), headers, nil
 		}
 		lastErr = errMsg
 		if !h.shouldAttemptRoutingModelVersionFallback(errMsg) && !h.shouldAttemptModelVersionFallback(errMsg.Error) {
 			return nil, headers, errMsg
 		}
-		next := nextFallbackModel(currentModel, providers)
+		next := fallback.next(originalRequestedModel, providers)
 		if next == "" {
 			return nil, headers, errMsg
 		}
@@ -82,19 +109,23 @@ func (h *BaseAPIHandler) executeCountWithAuthManagerWithVersionFallback(
 	currentModel := modelName
 	currentPayload := rawJSON
 	var lastErr *interfaces.ErrorMessage
+	var fallback modelversionFallbackState
 
 	for range maxVersionFallbackHops {
 		body, headers, errMsg := h.executeCountWithAuthManagerOnce(
 			ctx, handlerType, currentModel, currentPayload, alt, execOptions,
 		)
 		if errMsg == nil {
+			if currentModel == originalRequestedModel {
+				return body, headers, nil
+			}
 			return restoreOriginalModelInBody(body, originalRequestedModel), headers, nil
 		}
 		lastErr = errMsg
 		if !h.shouldAttemptRoutingModelVersionFallback(errMsg) && !h.shouldAttemptModelVersionFallback(errMsg.Error) {
 			return nil, headers, errMsg
 		}
-		next := nextFallbackModel(currentModel, providers)
+		next := fallback.next(originalRequestedModel, providers)
 		if next == "" {
 			return nil, headers, errMsg
 		}
@@ -112,12 +143,16 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormatsWithVersionFallback(
 	originalRequestedModel := modelName
 	currentModel := modelName
 	currentPayload := rawJSON
+	var fallback modelversionFallbackState
 
 	for range maxVersionFallbackHops {
 		dataChan, headers, errChan := h.executeStreamWithAuthManagerFormatsOnce(
 			ctx, entryProtocol, exitProtocol, currentModel, currentPayload, alt, allowImageModel, execOptions,
 		)
 		if dataChan != nil {
+			if currentModel == originalRequestedModel {
+				return dataChan, headers, errChan
+			}
 			wrapped := make(chan []byte)
 			go func(displayModel string, in <-chan []byte) {
 				defer close(wrapped)
@@ -152,7 +187,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormatsWithVersionFallback(
 			close(out)
 			return nil, headers, out
 		}
-		next := nextFallbackModel(currentModel, providers)
+		next := fallback.next(originalRequestedModel, providers)
 		if next == "" {
 			out := make(chan *interfaces.ErrorMessage, 1)
 			out <- errMsg

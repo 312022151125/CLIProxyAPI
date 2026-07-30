@@ -52,6 +52,19 @@ func isAPIKeyAuth(auth *Auth) bool {
 	return auth.AuthKind() == AuthKindAPIKey
 }
 
+func isOpenAICompatAPIKeyAuth(auth *Auth) bool {
+	if !isAPIKeyAuth(auth) {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(auth.Provider), "openai-compatibility") {
+		return true
+	}
+	if auth.Attributes == nil {
+		return false
+	}
+	return strings.TrimSpace(auth.Attributes["compat_name"]) != ""
+}
+
 func isConfiguredOpenAICompatAuth(auth *Auth) bool {
 	if !isConfiguredModelRoutingAuth(auth) {
 		return false

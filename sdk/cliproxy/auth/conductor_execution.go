@@ -44,6 +44,9 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 		if isRequestTerminatedError(errExec) {
 			return cliproxyexecutor.Response{}, errExec
 		}
+		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errExec); ok {
+			return cliproxyexecutor.Response{}, exhaustedErr
+		}
 		lastErr = errExec
 		wait, shouldRetry := m.shouldRetryAfterError(errExec, attempt, normalized, retryModel, maxWait)
 		if !shouldRetry {
@@ -91,6 +94,9 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 		if isRequestTerminatedError(errExec) {
 			return cliproxyexecutor.Response{}, errExec
 		}
+		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errExec); ok {
+			return cliproxyexecutor.Response{}, exhaustedErr
+		}
 		lastErr = errExec
 		wait, shouldRetry := m.shouldRetryAfterError(errExec, attempt, normalized, retryModel, maxWait)
 		if !shouldRetry {
@@ -131,6 +137,9 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 		}
 		if isRequestTerminatedError(errStream) {
 			return nil, errStream
+		}
+		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errStream); ok {
+			return nil, exhaustedErr
 		}
 		lastErr = errStream
 		wait, shouldRetry := m.shouldRetryAfterError(errStream, attempt, normalized, retryModel, maxWait)

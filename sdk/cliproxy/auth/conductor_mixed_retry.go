@@ -83,7 +83,13 @@ func ResolveOpenAICompatColonEffortModel(cfg *internalconfig.Config, auth *Auth,
 	if !isOpenAICompatColonEffort(effort) {
 		return requestedModel, "", false
 	}
-	entry := resolveOpenAICompatConfigForAuth(cfg, auth)
+	providerKey := ""
+	compatName := ""
+	if auth != nil && auth.Attributes != nil {
+		providerKey = strings.TrimSpace(auth.Attributes["provider_key"])
+		compatName = strings.TrimSpace(auth.Attributes["compat_name"])
+	}
+	entry := resolveOpenAICompatConfigForAuth(cfg, auth, providerKey, compatName)
 	if entry == nil {
 		return requestedModel, "", false
 	}
@@ -118,19 +124,6 @@ func isOpenAICompatColonEffort(effort string) bool {
 	default:
 		return false
 	}
-}
-
-func resolveOpenAICompatConfigForAuth(cfg *internalconfig.Config, auth *Auth) *internalconfig.OpenAICompatibility {
-	if auth == nil {
-		return nil
-	}
-	providerKey := ""
-	compatName := ""
-	if auth.Attributes != nil {
-		providerKey = strings.TrimSpace(auth.Attributes["provider_key"])
-		compatName = strings.TrimSpace(auth.Attributes["compat_name"])
-	}
-	return resolveOpenAICompatConfig(cfg, providerKey, compatName, auth.Provider)
 }
 
 // mixedRetryPassExhaustedError marks an error as "every credential in this pass was

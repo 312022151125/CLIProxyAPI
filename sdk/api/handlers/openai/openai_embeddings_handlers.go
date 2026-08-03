@@ -60,8 +60,18 @@ func (h *OpenAIAPIHandler) Embeddings(c *gin.Context) {
 	// Start keep-alive for long-running requests
 	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
 
-	// Execute the request via auth manager (non-streaming)
-	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, h.HandlerType(), modelName, rawJSON, "")
+	// Execute the request via auth manager (non-streaming), preserving the
+	// original /v1/embeddings path so the OpenAI-compatible executor routes
+	// upstream to /embeddings instead of the default /chat/completions.
+	resp, upstreamHeaders, errMsg := h.ExecuteOpenAICompatPassthrough(
+		cliCtx,
+		modelName,
+		rawJSON,
+		http.MethodPost,
+		c.Request.URL.Path,
+		c.Request.Header,
+		c.Request.URL.Query(),
+	)
 
 	// Stop keep-alive after execution completes
 	stopKeepAlive()

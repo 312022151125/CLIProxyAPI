@@ -36,6 +36,7 @@ func TestOpenAICompatExecutorCompactPassthrough(t *testing.T) {
 		OpenAICompatibility: []config.OpenAICompatibility{{
 			Name:                  "compat",
 			SupportPromptCacheKey: true,
+			ResponsesCompaction:   true,
 		}},
 	})
 	auth := &cliproxyauth.Auth{

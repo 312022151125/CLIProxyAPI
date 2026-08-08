@@ -12,14 +12,14 @@ import (
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
-// openAICompat429KeyRotationEnabled reports whether the runtime config allows
+// openAICompat429KeyRotationEnabled reports whether runtime config allows
 // exhausting every OpenAI-compatible API key before giving up on a 429.
 func (m *Manager) openAICompat429KeyRotationEnabled() bool {
 	if m == nil {
-		return false
+		return true
 	}
 	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
-	return cfg != nil && cfg.OpenAICompat429KeyRotation
+	return cfg == nil || cfg.OpenAICompat429KeyRotation == nil || *cfg.OpenAICompat429KeyRotation
 }
 
 // openAICompatProvidersWithUntriedAuth returns the subset of providers that still

@@ -15,6 +15,8 @@ import (
 
 const openAICompatPoolProviderKey = "openai-compatible-pool"
 
+func boolPointer(value bool) *bool { return &value }
+
 type openAICompatPoolExecutor struct {
 	id string
 
@@ -906,7 +908,7 @@ func newTwoAuthOpenAICompatPoolManager(t *testing.T, executor *authScopedOpenAIC
 	alias := "claude-opus-4.66"
 	m := NewManager(nil, nil, nil)
 	m.SetConfig(&internalconfig.Config{
-		OpenAICompat429KeyRotation: rotateOn429,
+		OpenAICompat429KeyRotation: boolPointer(rotateOn429),
 		OpenAICompatibility: []internalconfig.OpenAICompatibility{{
 			Name:   "pool",
 			Models: []internalconfig.OpenAICompatibilityModel{{Name: "deepseek-v3.1", Alias: alias}},

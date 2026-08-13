@@ -355,6 +355,10 @@ type ClaudeKey struct {
 	// DisableCooling disables auth/model cooldown scheduling for this credential when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
 
+	// RequestRetry optionally overrides the global request-retry for this credential.
+	// Nil or a negative value means "use the global request-retry". 0 disables retries.
+	RequestRetry *int `yaml:"request-retry,omitempty" json:"request-retry,omitempty"`
+
 	// Cloak configures request cloaking for non-Claude-Code clients.
 	Cloak *CloakConfig `yaml:"cloak,omitempty" json:"cloak,omitempty"`
 
@@ -449,6 +453,10 @@ type CodexKey struct {
 
 	// DisableCooling disables auth/model cooldown scheduling for this credential when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
+
+	// RequestRetry optionally overrides the global request-retry for this credential.
+	// Nil or a negative value means "use the global request-retry". 0 disables retries.
+	RequestRetry *int `yaml:"request-retry,omitempty" json:"request-retry,omitempty"`
 }
 
 func (k CodexKey) GetAPIKey() string { return k.APIKey }
@@ -538,6 +546,10 @@ type GeminiKey struct {
 
 	// DisableCooling disables auth/model cooldown scheduling for this credential when true.
 	DisableCooling bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
+
+	// RequestRetry optionally overrides the global request-retry for this credential.
+	// Nil or a negative value means "use the global request-retry". 0 disables retries.
+	RequestRetry *int `yaml:"request-retry,omitempty" json:"request-retry,omitempty"`
 }
 
 func (k GeminiKey) GetAPIKey() string { return k.APIKey }
@@ -622,6 +634,10 @@ type OpenAICompatibility struct {
 	// ignoring global routing.strategy=fill-first and routing.session-affinity sticky binding
 	// for credentials synthesized from this entry.
 	ForceBalance bool `yaml:"force-balance,omitempty" json:"force-balance,omitempty"`
+
+	// RequestRetry optionally overrides the global request-retry for this provider.
+	// Nil or a negative value means "use the global request-retry". 0 disables retries.
+	RequestRetry *int `yaml:"request-retry,omitempty" json:"request-retry,omitempty"`
 
 	// ResponsesPassthrough when true forwards POST /v1/responses directly to upstream /responses
 	// without converting to Chat Completions format.

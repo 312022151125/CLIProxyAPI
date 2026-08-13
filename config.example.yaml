@@ -141,7 +141,7 @@ force-model-prefix: false
 # Default is false (disabled).
 passthrough-headers: false
 
-# Number of times to retry a request. Retries will occur if the HTTP response code is 403, 408, 500, 502, 503, or 504.
+# Number of times to retry a request. Retries will occur if the HTTP response code is 403, 408, 500, 502, 503, or 504, or upon semantic upstream timeout responses.
 request-retry: 3
 
 # Maximum number of different credentials to try for one failed request.

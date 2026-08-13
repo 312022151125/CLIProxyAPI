@@ -169,6 +169,17 @@ func (m *Manager) runMixedRetry(ctx context.Context, normalized []string, req cl
 			return cliproxyexecutor.Response{}, exhaustedErr
 		}
 		lastErr = errExec
+		if isUpstreamTimeoutError(errExec) {
+			maxRetries := m.effectiveRequestRetry(normalized)
+			if attempt < maxRetries {
+				delay := semanticRetryDelay(attempt)
+				if errWait := semanticRetryWaitFunc(ctx, delay); errWait != nil {
+					return cliproxyexecutor.Response{}, errWait
+				}
+				continue
+			}
+			break
+		}
 		wait, shouldRetry := m.shouldRetryAfterError(errExec, attempt, normalized, retryModel, maxWait)
 		if !shouldRetry {
 			break
@@ -198,6 +209,17 @@ func (m *Manager) runStreamMixedRetry(ctx context.Context, normalized []string, 
 			return nil, exhaustedErr
 		}
 		lastErr = errStream
+		if isUpstreamTimeoutError(errStream) {
+			maxRetries := m.effectiveRequestRetry(normalized)
+			if attempt < maxRetries {
+				delay := semanticRetryDelay(attempt)
+				if errWait := semanticRetryWaitFunc(ctx, delay); errWait != nil {
+					return nil, errWait
+				}
+				continue
+			}
+			break
+		}
 		wait, shouldRetry := m.shouldRetryAfterError(errStream, attempt, normalized, retryModel, maxWait)
 		if !shouldRetry {
 			break
@@ -210,6 +232,68 @@ func (m *Manager) runStreamMixedRetry(ctx context.Context, normalized []string, 
 		return nil, lastErr
 	}
 	return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
+}
+func semanticRetryDelay(attempt int) time.Duration {
+	shift := attempt
+	if shift > 2 {
+		shift = 2
+	}
+	return time.Duration(1<<shift) * time.Second
+}
+
+var semanticRetryWaitFunc = func(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (m *Manager) effectiveRequestRetry(providers []string) int {
+	if m == nil {
+		return 0
+	}
+	defaultRetry := int(m.requestRetry.Load())
+	if defaultRetry < 0 {
+		defaultRetry = 0
+	}
+	if len(providers) == 0 {
+		return defaultRetry
+	}
+	providerSet := make(map[string]struct{}, len(providers))
+	for i := range providers {
+		key := strings.TrimSpace(strings.ToLower(providers[i]))
+		if key != "" {
+			providerSet[key] = struct{}{}
+		}
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	maxRetry := defaultRetry
+	for _, auth := range m.auths {
+		if auth == nil {
+			continue
+		}
+		providerKey := executorKeyFromAuth(auth)
+		if _, ok := providerSet[providerKey]; !ok {
+			continue
+		}
+		if override, ok := auth.RequestRetryOverride(); ok {
+			if override > maxRetry {
+				maxRetry = override
+			}
+		}
+	}
+	if maxRetry < 0 {
+		maxRetry = 0
+	}
+	return maxRetry
 }
 
 // isRetryableStatusCode reports whether a status justifies retrying on another credential.

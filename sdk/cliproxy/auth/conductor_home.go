@@ -1115,6 +1115,9 @@ func (m *Manager) tryAntigravityCreditsExecute(ctx context.Context, req cliproxy
 			execReq := req
 			execReq.Model = upstreamModel
 			resp, errExec := c.executor.Execute(creditsCtx, c.auth, execReq, creditsOpts)
+			if errExec == nil && len(resp.Payload) > 0 && hasUpstreamTimeoutMarker(string(resp.Payload)) {
+				errExec = newUpstreamTimeoutError(string(resp.Payload))
+			}
 			result := Result{AuthID: c.auth.ID, Provider: c.provider, Model: resultModel, Success: errExec == nil}
 			if errExec != nil {
 				result.Error = resultErrorFromError(errExec)

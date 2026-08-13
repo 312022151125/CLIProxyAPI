@@ -1,10 +1,51 @@
 package auth
 
+import (
+	"errors"
+	"strings"
+)
+
 const requestScopedErrorCode = "request_scoped"
 
 // connectionLifecycleErrorCode marks transport/session lifecycle failures that
 // must skip credential cooldown without being treated as request-scoped faults.
 const connectionLifecycleErrorCode = "connection_lifecycle"
+
+const upstreamTimeoutErrorCode = "upstream_timeout"
+
+const (
+	markerProviderEnded   = "Provider ended the request"
+	markerUpstreamTimeout = "上游响应超时"
+)
+
+// hasUpstreamTimeoutMarker performs a literal case-sensitive check for upstream timeout markers.
+func hasUpstreamTimeoutMarker(text string) bool {
+	return strings.Contains(text, markerProviderEnded) || strings.Contains(text, markerUpstreamTimeout)
+}
+
+// newUpstreamTimeoutError returns a semantic upstream timeout Error.
+// The upstream text is intentionally not retained: Error.Message is serialized
+// into client responses, and timeout payloads may contain provider-local text.
+func newUpstreamTimeoutError(_ string) *Error {
+	return &Error{
+		Code:       upstreamTimeoutErrorCode,
+		Message:    "upstream provider timeout; retry the request",
+		Retryable:  true,
+		HTTPStatus: 503,
+	}
+}
+
+// isUpstreamTimeoutError checks if an error represents a semantic upstream timeout failure.
+func isUpstreamTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var authErr *Error
+	if errors.As(err, &authErr) && authErr != nil && authErr.Code == upstreamTimeoutErrorCode {
+		return true
+	}
+	return hasUpstreamTimeoutMarker(err.Error())
+}
 
 // Error describes an authentication related failure in a provider agnostic format.
 type Error struct {

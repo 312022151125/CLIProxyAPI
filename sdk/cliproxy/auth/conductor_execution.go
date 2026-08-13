@@ -61,6 +61,17 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 			return cliproxyexecutor.Response{}, exhaustedErr
 		}
 		lastErr = errExec
+		if isUpstreamTimeoutError(errExec) {
+			maxRetries := m.effectiveRequestRetry(normalized)
+			if attempt < maxRetries {
+				delay := semanticRetryDelay(attempt)
+				if errWait := semanticRetryWaitFunc(ctx, delay); errWait != nil {
+					return cliproxyexecutor.Response{}, errWait
+				}
+				continue
+			}
+			break
+		}
 		wait, shouldRetry := m.shouldRetryAfterError(errExec, attempt, normalized, retryModel, maxWait)
 		if !shouldRetry {
 			break
@@ -111,6 +122,17 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 			return cliproxyexecutor.Response{}, exhaustedErr
 		}
 		lastErr = errExec
+		if isUpstreamTimeoutError(errExec) {
+			maxRetries := m.effectiveRequestRetry(normalized)
+			if attempt < maxRetries {
+				delay := semanticRetryDelay(attempt)
+				if errWait := semanticRetryWaitFunc(ctx, delay); errWait != nil {
+					return cliproxyexecutor.Response{}, errWait
+				}
+				continue
+			}
+			break
+		}
 		wait, shouldRetry := m.shouldRetryAfterError(errExec, attempt, normalized, retryModel, maxWait)
 		if !shouldRetry {
 			break
@@ -155,6 +177,17 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 			return nil, exhaustedErr
 		}
 		lastErr = errStream
+		if isUpstreamTimeoutError(errStream) {
+			maxRetries := m.effectiveRequestRetry(normalized)
+			if attempt < maxRetries {
+				delay := semanticRetryDelay(attempt)
+				if errWait := semanticRetryWaitFunc(ctx, delay); errWait != nil {
+					return nil, errWait
+				}
+				continue
+			}
+			break
+		}
 		wait, shouldRetry := m.shouldRetryAfterError(errStream, attempt, normalized, retryModel, maxWait)
 		if !shouldRetry {
 			break
@@ -393,6 +426,9 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 					}
 				}
 			}
+			if errExec == nil && len(resp.Payload) > 0 && hasUpstreamTimeoutMarker(string(resp.Payload)) {
+				errExec = newUpstreamTimeoutError(string(resp.Payload))
+			}
 			if errCancel := claudeOAuthRequestCancellation(execCtx, auth, errExec); errCancel != nil {
 				return cliproxyexecutor.Response{}, errCancel
 			}
@@ -522,6 +558,9 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 						}
 					}
 				}
+			}
+			if errExec == nil && len(resp.Payload) > 0 && hasUpstreamTimeoutMarker(string(resp.Payload)) {
+				errExec = newUpstreamTimeoutError(string(resp.Payload))
 			}
 			if errCancel := claudeOAuthRequestCancellation(execCtx, auth, errExec); errCancel != nil {
 				return cliproxyexecutor.Response{}, errCancel

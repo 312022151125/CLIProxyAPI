@@ -1234,6 +1234,11 @@ func resultErrorFromError(err error) *Error {
 		resultErr.HTTPStatus = statusCodeFromError(err)
 	}
 	switch {
+	case isUpstreamTimeoutError(err):
+		resultErr.Code = upstreamTimeoutErrorCode
+		if resultErr.HTTPStatus == 0 {
+			resultErr.HTTPStatus = 503
+		}
 	case isRequestScopedError(err) || isRequestInvalidError(err):
 		// Prefer true request-scoped faults (including Claude OAuth cancellation)
 		// over the broader connection-lifecycle classification.
@@ -1250,9 +1255,15 @@ func resultErrorFromError(err error) *Error {
 
 // shouldSkipCredentialCooldown reports failures that must not mark auth/model cooling.
 // Connection lifecycle is intentionally separate from request_scoped so transport
-// drops do not also stop credential rotation via isRequestInvalidError.
+// shouldSkipCredentialCooldown reports whether an error must skip cooling down
+// credentials. Semantic upstream timeouts, request-scoped errors, and lifecycle
+// drops do not penalize credentials so they can be retried immediately.
 func shouldSkipCredentialCooldown(err *Error) bool {
-	return isRequestScopedResultError(err) || isConnectionLifecycleResultError(err)
+	return isRequestScopedResultError(err) || isConnectionLifecycleResultError(err) || isUpstreamTimeoutResultError(err)
+}
+
+func isUpstreamTimeoutResultError(err *Error) bool {
+	return err != nil && err.Code == upstreamTimeoutErrorCode
 }
 
 // isConnectionLifecycleError reports transport/session lifecycle failures that must
@@ -1696,6 +1707,9 @@ func isMissingModelPhrase(value string) bool {
 // errors remain eligible for alternate routing and keep their model-level state.
 func isRequestInvalidError(err error) bool {
 	if err == nil {
+		return false
+	}
+	if isUpstreamTimeoutError(err) {
 		return false
 	}
 	if isRequestScopedError(err) {

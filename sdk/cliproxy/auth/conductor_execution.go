@@ -333,7 +333,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 	rotateOn429 := m.openAICompat429KeyRotationEnabled()
 	exhaustOpenAICompatKeys := false
 	for {
-		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials && (!rotateOn429 || !exhaustOpenAICompatKeys || len(m.openAICompatProvidersWithUntriedAuth(providers, tried)) == 0) {
+		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials && (!rotateOn429 || !exhaustOpenAICompatKeys || len(m.openAICompatProvidersWithUntriedAuth(providers, tried)) == 0) && !m.hasUntriedBackupAuth(providers, tried) {
 			if rotateOn429 && exhaustOpenAICompatKeys && lastErr != nil {
 				return cliproxyexecutor.Response{}, &mixedRetryPassExhaustedError{cause: lastErr}
 			}
@@ -479,7 +479,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 	attempted := make(map[string]struct{})
 	var lastErr error
 	for {
-		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials {
+		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials && !m.hasUntriedBackupAuth(providers, tried) {
 			if lastErr != nil {
 				return cliproxyexecutor.Response{}, lastErr
 			}
@@ -621,7 +621,7 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 	rotateOn429 := m.openAICompat429KeyRotationEnabled()
 	exhaustOpenAICompatKeys := false
 	for {
-		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials && (!rotateOn429 || !exhaustOpenAICompatKeys || len(m.openAICompatProvidersWithUntriedAuth(providers, tried)) == 0) {
+		if !homeMode && maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials && (!rotateOn429 || !exhaustOpenAICompatKeys || len(m.openAICompatProvidersWithUntriedAuth(providers, tried)) == 0) && !m.hasUntriedBackupAuth(providers, tried) {
 			if rotateOn429 && exhaustOpenAICompatKeys && lastErr != nil {
 				return nil, &mixedRetryPassExhaustedError{cause: lastErr}
 			}

@@ -22,6 +22,41 @@ func (m *Manager) openAICompat429KeyRotationEnabled() bool {
 	return cfg == nil || cfg.OpenAICompat429KeyRotation == nil || *cfg.OpenAICompat429KeyRotation
 }
 
+// hasUntriedBackupAuth reports whether any provider in the list still has at least one
+// backup (priority=-1) auth that has not yet been tried. This is used to allow the
+// credential retry loop to continue past the maxRetryCredentials limit so that
+// last-resort credentials are always attempted before giving up entirely.
+func (m *Manager) hasUntriedBackupAuth(providers []string, tried map[string]struct{}) bool {
+	if m == nil || len(providers) == 0 {
+		return false
+	}
+	providerSet := make(map[string]struct{}, len(providers))
+	for _, provider := range providers {
+		providerKey := strings.TrimSpace(strings.ToLower(provider))
+		if providerKey != "" {
+			providerSet[providerKey] = struct{}{}
+		}
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, auth := range m.auths {
+		if auth == nil || auth.Disabled {
+			continue
+		}
+		if !isBackupPriority(authPriority(auth)) {
+			continue
+		}
+		if _, used := tried[auth.ID]; used {
+			continue
+		}
+		providerKey := executorKeyFromAuth(auth)
+		if _, ok := providerSet[providerKey]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // openAICompatProvidersWithUntriedAuth returns the subset of providers that still
 // have an untried, enabled OpenAI-compatible API key credential available.
 func (m *Manager) openAICompatProvidersWithUntriedAuth(providers []string, tried map[string]struct{}) []string {

@@ -1994,3 +1994,91 @@ func TestSchedulerPick_MixedBackupPriorityLastResort(t *testing.T) {
 		t.Fatalf("pickMixed() with all non-backup tried: auth.ID = %q, want gemini-backup", got.ID)
 	}
 }
+
+// TestBackupAuthBypassesMaxRetryCredentialsLimit verifies that backup (priority=-1)
+// credentials are always attempted even when the maxRetryCredentials limit has been
+// reached by non-backup credentials. All backup credentials are tried in order
+// before returning an error.
+func TestBackupAuthBypassesMaxRetryCredentialsLimit(t *testing.T) {
+	model := "test-model"
+	reg := registry.GetGlobalRegistry()
+	for _, id := range []string{"normal-a", "normal-b", "backup-1", "backup-2"} {
+		reg.RegisterClient(id, "gemini", []*registry.ModelInfo{{ID: model}})
+	}
+	t.Cleanup(func() {
+		for _, id := range []string{"normal-a", "normal-b", "backup-1", "backup-2"} {
+			reg.UnregisterClient(id)
+		}
+	})
+
+	callOrder := make([]string, 0, 4)
+	exec := &captureOrderExecutor{
+		provider:  "gemini",
+		callOrder: &callOrder,
+		// Tất cả đều fail để kiểm tra retry đi hết vòng
+		failAll: true,
+	}
+
+	manager := NewManager(nil, &RoundRobinSelector{}, nil)
+	manager.RegisterExecutor(exec)
+	// maxRetryCredentials = 2 — chỉ cho phép 2 non-backup
+	manager.SetRetryConfig(0, 0, 2)
+
+	for _, auth := range []*Auth{
+		{ID: "normal-a", Provider: "gemini", Attributes: map[string]string{"priority": "0"}},
+		{ID: "normal-b", Provider: "gemini", Attributes: map[string]string{"priority": "0"}},
+		{ID: "backup-1", Provider: "gemini", Attributes: map[string]string{"priority": "-1"}},
+		{ID: "backup-2", Provider: "gemini", Attributes: map[string]string{"priority": "-1"}},
+	} {
+		if _, errReg := manager.Register(context.Background(), auth); errReg != nil {
+			t.Fatalf("Register(%s) error = %v", auth.ID, errReg)
+		}
+	}
+
+	_, errExec := manager.Execute(context.Background(), []string{"gemini"}, cliproxyexecutor.Request{Model: model}, cliproxyexecutor.Options{})
+	if errExec == nil {
+		t.Fatal("Execute() error = nil, want error (all auths fail)")
+	}
+
+	// Hệ thống phải đã thử: normal-a, normal-b (hết limit), nhưng vẫn tiếp tục backup-1, backup-2
+	tried := make(map[string]int, len(callOrder))
+	for _, id := range callOrder {
+		tried[id]++
+	}
+	for _, wantID := range []string{"normal-a", "normal-b", "backup-1", "backup-2"} {
+		if tried[wantID] == 0 {
+			t.Errorf("auth %q was never tried; callOrder=%v", wantID, callOrder)
+		}
+	}
+}
+
+// captureOrderExecutor records which auth IDs were executed, in order.
+type captureOrderExecutor struct {
+	provider  string
+	callOrder *[]string
+	failAll   bool
+}
+
+func (e *captureOrderExecutor) Identifier() string { return e.provider }
+
+func (e *captureOrderExecutor) Execute(_ context.Context, auth *Auth, _ cliproxyexecutor.Request, _ cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	*e.callOrder = append(*e.callOrder, auth.ID)
+	if e.failAll {
+		return cliproxyexecutor.Response{}, &Error{Code: "upstream_error", HTTPStatus: 500, Message: "forced failure"}
+	}
+	return cliproxyexecutor.Response{Payload: []byte(`{}`)}, nil
+}
+
+func (e *captureOrderExecutor) ExecuteStream(_ context.Context, _ *Auth, _ cliproxyexecutor.Request, _ cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
+	return nil, nil
+}
+
+func (e *captureOrderExecutor) Refresh(_ context.Context, auth *Auth) (*Auth, error) { return auth, nil }
+
+func (e *captureOrderExecutor) CountTokens(_ context.Context, _ *Auth, _ cliproxyexecutor.Request, _ cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	return cliproxyexecutor.Response{}, nil
+}
+
+func (e *captureOrderExecutor) HttpRequest(_ context.Context, _ *Auth, _ *http.Request) (*http.Response, error) {
+	return nil, nil
+}

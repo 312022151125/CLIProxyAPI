@@ -796,7 +796,18 @@ func (m *modelScheduler) pickReadyLocked(preferWebsocket bool, strategy schedule
 	return m.pickReadyAtPriorityLocked(preferWebsocket, priorityReady, strategy, predicate)
 }
 
+// backupPriority is the sentinel priority value that marks a credential as a last-resort
+// backup. Backups are only considered when no non-backup credential is eligible.
+const backupPriority = -1
+
+// isBackupPriority reports whether a priority value designates a last-resort backup credential.
+func isBackupPriority(priority int) bool {
+	return priority == backupPriority
+}
+
 // highestReadyPriorityLocked returns the highest priority bucket that still has a matching ready auth.
+// Priority=-1 (backupPriority) is only returned when no non-backup bucket has any eligible auth,
+// making those credentials a true last-resort that is never picked ahead of any other tier.
 // The caller must ensure expired entries are already promoted when needed.
 func (m *modelScheduler) highestReadyPriorityLocked(preferWebsocket bool, predicate func(*scheduledAuth) bool) (int, bool) {
 	if m == nil {
@@ -805,7 +816,11 @@ func (m *modelScheduler) highestReadyPriorityLocked(preferWebsocket bool, predic
 	if preferWebsocket {
 		// When downstream is websocket and Codex supports websocket transport, prefer websocket-enabled
 		// credentials even if they are in a lower priority tier than HTTP-only credentials.
+		// Backup credentials (priority=-1) are still excluded in the first pass.
 		for _, priority := range m.priorityOrder {
+			if isBackupPriority(priority) {
+				continue
+			}
 			bucket := m.readyByPriority[priority]
 			if bucket == nil {
 				continue
@@ -815,7 +830,24 @@ func (m *modelScheduler) highestReadyPriorityLocked(preferWebsocket bool, predic
 			}
 		}
 	}
+	// First pass: non-backup priorities only.
 	for _, priority := range m.priorityOrder {
+		if isBackupPriority(priority) {
+			continue
+		}
+		bucket := m.readyByPriority[priority]
+		if bucket == nil {
+			continue
+		}
+		if bucket.all.pickFirst(predicate) != nil {
+			return priority, true
+		}
+	}
+	// Second pass: backup priorities only, reached when every non-backup tier is exhausted.
+	for _, priority := range m.priorityOrder {
+		if !isBackupPriority(priority) {
+			continue
+		}
 		bucket := m.readyByPriority[priority]
 		if bucket == nil {
 			continue

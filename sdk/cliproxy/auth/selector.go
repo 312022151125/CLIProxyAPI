@@ -365,17 +365,23 @@ func availableAuthsFromPriorityBuckets(availableByPriority map[int][]*Auth, allP
 	return candidates
 }
 
-// highestPriorityAuths narrows an availability slice to its highest priority tier while
-// preserving the input order. The input slice is returned unchanged when every candidate
-// already shares the highest priority, so the common single-tier case allocates nothing.
+// highestPriorityAuths narrows an availability slice to its highest non-backup priority tier
+// while preserving the input order. Backup credentials (priority=-1) are only included when
+// every candidate in the slice is a backup, making them a true last-resort.
+// The input slice is returned unchanged when every candidate already shares the highest priority,
+// so the common single-tier case allocates nothing.
 func highestPriorityAuths(auths []*Auth) []*Auth {
 	if len(auths) <= 1 {
 		return auths
 	}
 	bestPriority := 0
 	bestCount := 0
+	hasNonBackup := false
 	for _, auth := range auths {
 		priority := authPriority(auth)
+		if !isBackupPriority(priority) {
+			hasNonBackup = true
+		}
 		switch {
 		case bestCount == 0 || priority > bestPriority:
 			bestPriority = priority
@@ -384,8 +390,25 @@ func highestPriorityAuths(auths []*Auth) []*Auth {
 			bestCount++
 		}
 	}
+	// If there are non-backup candidates but bestPriority resolved to backup (-1),
+	// that cannot happen since non-backup priorities are always > -1. However, if
+	// all candidates are non-backup and share the same priority, return as-is.
 	if bestCount == len(auths) {
 		return auths
+	}
+	// When there are non-backup candidates, exclude backup entries from the result
+	// so selectors never see backup credentials while a non-backup tier is available.
+	if hasNonBackup && isBackupPriority(bestPriority) {
+		// bestPriority is -1 but we have non-backup entries — filter to non-backup only.
+		// This cannot happen because non-backup > -1, so bestPriority would not be -1.
+		// Guard included for safety.
+		nonBackup := make([]*Auth, 0, len(auths))
+		for _, auth := range auths {
+			if !isBackupPriority(authPriority(auth)) {
+				nonBackup = append(nonBackup, auth)
+			}
+		}
+		return nonBackup
 	}
 	highest := make([]*Auth, 0, bestCount)
 	for _, auth := range auths {
@@ -394,6 +417,18 @@ func highestPriorityAuths(auths []*Auth) []*Auth {
 		}
 	}
 	return highest
+}
+
+// nonBackupAuths returns only the non-backup (priority != -1) entries from auths.
+// Returns nil when all entries are backups.
+func nonBackupAuths(auths []*Auth) []*Auth {
+	out := make([]*Auth, 0, len(auths))
+	for _, auth := range auths {
+		if !isBackupPriority(authPriority(auth)) {
+			out = append(out, auth)
+		}
+	}
+	return out
 }
 
 // Pick selects the next available auth for the provider in a round-robin manner.
@@ -731,13 +766,20 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 
 	if cachedAuthID, ok := s.cache.GetAndRefresh(cacheKey); ok {
 		for _, auth := range available {
-			if auth.ID == cachedAuthID {
-				bind(auth.ID)
-				entry.Infof("session-affinity: cache hit | session=%s auth=%s provider=%s model=%s", truncateSessionID(primaryID), auth.ID, provider, model)
-				return auth, nil
+			if auth.ID != cachedAuthID {
+				continue
 			}
+			// Do not reuse a backup (priority=-1) binding while a non-backup credential
+			// is still available — the backup is last-resort and should not be sticky.
+			if isBackupPriority(authPriority(auth)) && len(nonBackupAuths(available)) > 0 {
+				break
+			}
+			bind(auth.ID)
+			entry.Infof("session-affinity: cache hit | session=%s auth=%s provider=%s model=%s", truncateSessionID(primaryID), auth.ID, provider, model)
+			return auth, nil
 		}
-		// Cached auth not available, reselect via fallback selector for even distribution
+		// Cached auth not available (or was backup with non-backup now available),
+		// reselect via fallback selector for even distribution.
 		auth, err := s.fallback.Pick(ctx, provider, model, opts, fallbackAuths)
 		if err != nil {
 			return nil, err
@@ -750,11 +792,16 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 	if fallbackKey != "" {
 		if cachedAuthID, ok := s.cache.Get(fallbackKey); ok {
 			for _, auth := range available {
-				if auth.ID == cachedAuthID {
-					bind(auth.ID)
-					entry.Infof("session-affinity: fallback cache hit | session=%s fallback=%s auth=%s provider=%s model=%s", truncateSessionID(primaryID), truncateSessionID(fallbackID), auth.ID, provider, model)
-					return auth, nil
+				if auth.ID != cachedAuthID {
+					continue
 				}
+				// Same backup guard for fallback key hits.
+				if isBackupPriority(authPriority(auth)) && len(nonBackupAuths(available)) > 0 {
+					break
+				}
+				bind(auth.ID)
+				entry.Infof("session-affinity: fallback cache hit | session=%s fallback=%s auth=%s provider=%s model=%s", truncateSessionID(primaryID), truncateSessionID(fallbackID), auth.ID, provider, model)
+				return auth, nil
 			}
 		}
 	}

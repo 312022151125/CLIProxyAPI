@@ -80,11 +80,13 @@ func TestImagesModelValidationAllowsOpenAICompatImageModels(t *testing.T) {
 		modelRegistry.UnregisterClient(clientID)
 	})
 
+	// Both image-flagged and plain openai-compatibility models are now accepted on
+	// /v1/images/* by default — image: true is no longer required.
 	if !isSupportedImagesModel("compat-image-model") {
-		t.Fatal("expected configured openai-compatibility image model to be supported")
+		t.Fatal("expected explicit-image openai-compatibility model to be supported")
 	}
-	if isSupportedImagesModel("compat-chat-model") {
-		t.Fatal("expected non-image openai-compatibility model to be rejected")
+	if !isSupportedImagesModel("compat-chat-model") {
+		t.Fatal("expected plain openai-compatibility model to be supported on /v1/images/* by default")
 	}
 }
 

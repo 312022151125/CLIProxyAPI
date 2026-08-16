@@ -17,6 +17,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/clienterror"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
@@ -163,8 +164,21 @@ func isSoraVideosModel(model string) bool {
 	return baseModel == defaultOpenAIVideosModel || strings.HasPrefix(baseModel, defaultOpenAIVideosModel+"-")
 }
 
+func isOpenAICompatVideosModel(model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+	info := registry.LookupModelInfo(model)
+	if info == nil {
+		return false
+	}
+	// Any openai-compatibility model (including image-flagged) supports video by default.
+	return info.Type == "openai-compatibility" || info.Type == registry.OpenAIImageModelType
+}
+
 func isSupportedVideosModel(model string) bool {
-	return isXAIVideosModel(model) || isSoraVideosModel(model)
+	return isXAIVideosModel(model) || isSoraVideosModel(model) || isOpenAICompatVideosModel(model)
 }
 
 func rejectUnsupportedVideosModel(c *gin.Context, model string) bool {

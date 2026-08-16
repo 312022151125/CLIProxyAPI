@@ -681,11 +681,15 @@ type OpenAICompatibilityModel struct {
 	// ForceMapping rewrites upstream response model fields back to Alias.
 	ForceMapping bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
 
-	// Image marks this model as callable through /v1/images/generations and /v1/images/edits.
-	Image bool `yaml:"image,omitempty" json:"image,omitempty"`
+	// Image controls whether this model is callable through /v1/images/* endpoints.
+	// Default is true (enabled). Set to false to explicitly disable image endpoints for this model.
+	Image *bool `yaml:"image,omitempty" json:"image,omitempty"`
+
+	// Video controls whether this model is callable through /v1/videos/* endpoints.
+	// Default is true (enabled). Set to false to explicitly disable video endpoints for this model.
+	Video *bool `yaml:"video,omitempty" json:"video,omitempty"`
 
 	// InputModalities declares chat/responses input capabilities (e.g. text, image) for Codex and other clients.
-	// This is separate from Image, which only enables /v1/images/* endpoints.
 	InputModalities []string `yaml:"input-modalities,omitempty" json:"input-modalities,omitempty"`
 
 	// OutputModalities declares supported output modalities when known (e.g. text, image).
@@ -710,3 +714,16 @@ func (m OpenAICompatibilityModel) GetForceMapping() bool    { return m.ForceMapp
 func (m OpenAICompatibilityModel) GetIsCompat() bool        { return m.IsCompat }
 
 func (m OpenAICompatibilityModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
+
+// ImageEnabled reports whether /v1/images/* endpoints are enabled for this model.
+// Default is true; returns false only when Image is explicitly set to false.
+func (m OpenAICompatibilityModel) ImageEnabled() bool {
+	return m.Image == nil || *m.Image
+}
+
+// VideoEnabled reports whether /v1/videos/* endpoints are enabled for this model.
+// Default is true; returns false only when Video is explicitly set to false.
+func (m OpenAICompatibilityModel) VideoEnabled() bool {
+	return m.Video == nil || *m.Video
+}
+

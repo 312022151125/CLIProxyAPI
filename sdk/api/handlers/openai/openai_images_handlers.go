@@ -254,7 +254,12 @@ func isOpenAICompatImagesModel(model string) bool {
 		return false
 	}
 	info := registry.LookupModelInfo(model)
-	return info != nil && info.Type == registry.OpenAIImageModelType
+	if info == nil {
+		return false
+	}
+	// Accept both explicit image-flagged models (OpenAIImageModelType) and any
+	// openai-compatibility model — images are enabled by default for compat providers.
+	return info.Type == registry.OpenAIImageModelType || info.Type == "openai-compatibility"
 }
 
 func rejectUnsupportedImagesModel(c *gin.Context, model string) bool {

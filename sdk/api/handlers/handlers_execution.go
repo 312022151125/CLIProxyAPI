@@ -35,6 +35,16 @@ func (h *BaseAPIHandler) ExecuteImageWithAuthManager(ctx context.Context, handle
 	return h.executeWithAuthManager(ctx, handlerType, modelName, rawJSON, alt, true)
 }
 
+// ExecuteVideoWithAuthManager executes an OpenAI-compatible video endpoint request.
+// Unlike ExecuteWithAuthManager, it allows routing with an empty model name so that
+// endpoints without a model in the body (list, delete, get-character) can still reach
+// an openai-compatibility or xai provider via first-available credential selection.
+func (h *BaseAPIHandler) ExecuteVideoWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string) ([]byte, http.Header, *interfaces.ErrorMessage) {
+	return h.executeWithAuthManagerFormats(ctx, handlerType, handlerType, modelName, rawJSON, alt, false, modelExecutionOptions{
+		AllowVideoModel: true,
+	})
+}
+
 func (h *BaseAPIHandler) executeWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string, allowImageModel bool) ([]byte, http.Header, *interfaces.ErrorMessage) {
 	return h.executeWithAuthManagerFormats(ctx, handlerType, handlerType, modelName, rawJSON, alt, allowImageModel, modelExecutionOptions{})
 }

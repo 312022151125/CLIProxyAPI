@@ -24,6 +24,7 @@ type modelExecutionOptions struct {
 	AuthSelectionModel      string
 	Method                  string
 	RequestPath             string
+	AllowVideoModel         bool
 }
 
 // ProtocolExecutionRequest describes a route-level model execution request with explicit protocols.

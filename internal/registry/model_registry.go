@@ -1448,3 +1448,24 @@ func (r *ModelRegistry) GetModelsForClient(clientID string) []*ModelInfo {
 	}
 	return result
 }
+
+// GetAllProviders returns the distinct provider identifiers of all registered clients.
+// Used as a fallback for video endpoints that do not carry a model name.
+func (r *ModelRegistry) GetAllProviders() []string {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	seen := make(map[string]struct{}, len(r.clientProviders))
+	out := make([]string, 0, len(r.clientProviders))
+	for _, provider := range r.clientProviders {
+		if provider == "" {
+			continue
+		}
+		if _, exists := seen[provider]; exists {
+			continue
+		}
+		seen[provider] = struct{}{}
+		out = append(out, provider)
+	}
+	sort.Strings(out)
+	return out
+}

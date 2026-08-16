@@ -793,12 +793,14 @@ func (h *OpenAIAPIHandler) VideosRetrieve(c *gin.Context) {
 	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
 	selectedAuthID := ""
 	cliCtx = h.contextWithVideoAuthBinding(cliCtx, videoID)
-	executionModel := h.modelWithVideoAuthBinding(videoID, defaultXAIVideosModel)
+	// Pass "" as fallback so ExecuteVideoWithAuthManager can select from all providers
+	// when no auth-binding model is found (supports openai-compatibility upstreams).
+	executionModel := h.modelWithVideoAuthBinding(videoID, "")
 	cliCtx = handlers.WithSelectedAuthIDCallback(cliCtx, func(authID string) {
 		selectedAuthID = authID
 	})
 	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
-	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, xaiVideosHandlerType, executionModel, payload, "")
+	resp, upstreamHeaders, errMsg := h.ExecuteVideoWithAuthManager(cliCtx, xaiVideosHandlerType, executionModel, payload, "")
 	stopKeepAlive()
 	if errMsg != nil {
 		h.WriteErrorResponse(c, errMsg)
@@ -856,12 +858,12 @@ func (h *OpenAIAPIHandler) VideosContent(c *gin.Context) {
 	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
 	selectedAuthID := ""
 	cliCtx = h.contextWithVideoAuthBinding(cliCtx, videoID)
-	executionModel := h.modelWithVideoAuthBinding(videoID, defaultXAIVideosModel)
+	executionModel := h.modelWithVideoAuthBinding(videoID, "")
 	cliCtx = handlers.WithSelectedAuthIDCallback(cliCtx, func(authID string) {
 		selectedAuthID = authID
 	})
 	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
-	resp, _, errMsg := h.ExecuteWithAuthManager(cliCtx, xaiVideosHandlerType, executionModel, payload, "")
+	resp, _, errMsg := h.ExecuteVideoWithAuthManager(cliCtx, xaiVideosHandlerType, executionModel, payload, "")
 	stopKeepAlive()
 	if errMsg != nil {
 		h.WriteErrorResponse(c, errMsg)
@@ -1056,12 +1058,13 @@ func (h *OpenAIAPIHandler) collectXAIVideosCreate(c *gin.Context, xaiReq []byte,
 func (h *OpenAIAPIHandler) XAIVideosList(c *gin.Context) {
 	// Build a minimal payload so the executor can route to the right provider.
 	// The actual query string is carried on the request URL which the executor forwards.
+	// No model is provided — ExecuteVideoWithAuthManager falls back to all registered providers.
 	payload := []byte(`{}`)
 
 	c.Header("Content-Type", "application/json")
 	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
 	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
-	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, xaiVideosHandlerType, defaultXAIVideosModel, payload, "videos/list")
+	resp, upstreamHeaders, errMsg := h.ExecuteVideoWithAuthManager(cliCtx, xaiVideosHandlerType, "", payload, "videos/list")
 	stopKeepAlive()
 	if errMsg != nil {
 		h.WriteErrorResponse(c, errMsg)
@@ -1096,9 +1099,11 @@ func (h *OpenAIAPIHandler) XAIVideosDelete(c *gin.Context) {
 	c.Header("Content-Type", "application/json")
 	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
 	cliCtx = h.contextWithVideoAuthBinding(cliCtx, requestID)
-	executionModel := h.modelWithVideoAuthBinding(requestID, defaultXAIVideosModel)
+	// Use the auth-bound model when available; pass "" so that ExecuteVideoWithAuthManager
+	// falls back to all registered providers when no binding exists.
+	executionModel := h.modelWithVideoAuthBinding(requestID, "")
 	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
-	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, xaiVideosHandlerType, executionModel, payload, "videos/delete")
+	resp, upstreamHeaders, errMsg := h.ExecuteVideoWithAuthManager(cliCtx, xaiVideosHandlerType, executionModel, payload, "videos/delete")
 	stopKeepAlive()
 	if errMsg != nil {
 		h.WriteErrorResponse(c, errMsg)
@@ -1219,10 +1224,11 @@ func (h *OpenAIAPIHandler) XAIVideosGetCharacter(c *gin.Context) {
 	payload := []byte(`{}`)
 	payload, _ = sjson.SetBytes(payload, "character_id", characterID)
 
+	// No model is provided — ExecuteVideoWithAuthManager falls back to all registered providers.
 	c.Header("Content-Type", "application/json")
 	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
 	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
-	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, xaiVideosHandlerType, defaultXAIVideosModel, payload, "videos/characters/get")
+	resp, upstreamHeaders, errMsg := h.ExecuteVideoWithAuthManager(cliCtx, xaiVideosHandlerType, "", payload, "videos/characters/get")
 	stopKeepAlive()
 	if errMsg != nil {
 		h.WriteErrorResponse(c, errMsg)

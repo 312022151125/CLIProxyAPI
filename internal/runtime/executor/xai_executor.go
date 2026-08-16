@@ -40,6 +40,7 @@ const (
 	xaiVideosGenerationsPath    = "/videos/generations"
 	xaiVideosEditsPath          = "/videos/edits"
 	xaiVideosExtensionsPath     = "/videos/extensions"
+	xaiVideosCharactersPath     = "/videos/characters"
 	xaiVideosPath               = "/videos"
 	xaiIdempotencyKeyMetaKey    = "idempotency_key"
 	xaiComposerModelPrefix      = "grok-composer-"

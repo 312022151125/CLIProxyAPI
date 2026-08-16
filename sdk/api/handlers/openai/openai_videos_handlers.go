@@ -39,7 +39,7 @@ const (
 	defaultVideosSeconds     = "4"
 	defaultVideosSize        = "720x1280"
 	defaultVideosResolution  = "720p"
-	maxXAIVideoReferences    = 7
+	maxXAIVideoReferences = 7
 )
 
 const defaultVideoAuthBindingTTL = 3 * time.Hour
@@ -1048,5 +1048,192 @@ func (h *OpenAIAPIHandler) collectXAIVideosCreate(c *gin.Context, xaiReq []byte,
 	h.bindVideoAuthIDAndModelFromPayload(out, selectedAuthID, routingModel)
 	handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
 	_, _ = c.Writer.Write(out)
+	cliCancel(nil)
+}
+
+// XAIVideosList handles GET /v1/videos — lists recently generated videos.
+// Query params: after, limit, order are forwarded as-is to the upstream.
+func (h *OpenAIAPIHandler) XAIVideosList(c *gin.Context) {
+	// Build a minimal payload so the executor can route to the right provider.
+	// The actual query string is carried on the request URL which the executor forwards.
+	payload := []byte(`{}`)
+
+	c.Header("Content-Type", "application/json")
+	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
+	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
+	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, xaiVideosHandlerType, defaultXAIVideosModel, payload, "videos/list")
+	stopKeepAlive()
+	if errMsg != nil {
+		h.WriteErrorResponse(c, errMsg)
+		if errMsg.Error != nil {
+			cliCancel(errMsg.Error)
+		} else {
+			cliCancel(nil)
+		}
+		return
+	}
+	handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
+	_, _ = c.Writer.Write(resp)
+	cliCancel(nil)
+}
+
+// XAIVideosDelete handles DELETE /v1/videos/:request_id — permanently deletes a video.
+func (h *OpenAIAPIHandler) XAIVideosDelete(c *gin.Context) {
+	requestID := strings.TrimSpace(c.Param("request_id"))
+	if requestID == "" {
+		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+			Error: handlers.ErrorDetail{
+				Message: "Invalid request: request_id is required",
+				Type:    "invalid_request_error",
+			},
+		})
+		return
+	}
+
+	payload := []byte(`{}`)
+	payload, _ = sjson.SetBytes(payload, "request_id", requestID)
+
+	c.Header("Content-Type", "application/json")
+	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
+	cliCtx = h.contextWithVideoAuthBinding(cliCtx, requestID)
+	executionModel := h.modelWithVideoAuthBinding(requestID, defaultXAIVideosModel)
+	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
+	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, xaiVideosHandlerType, executionModel, payload, "videos/delete")
+	stopKeepAlive()
+	if errMsg != nil {
+		h.WriteErrorResponse(c, errMsg)
+		if errMsg.Error != nil {
+			cliCancel(errMsg.Error)
+		} else {
+			cliCancel(nil)
+		}
+		return
+	}
+	handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
+	_, _ = c.Writer.Write(resp)
+	cliCancel(nil)
+}
+
+// XAIVideosRemix handles POST /v1/videos/:request_id/remix — remixes a completed video.
+func (h *OpenAIAPIHandler) XAIVideosRemix(c *gin.Context) {
+	requestID := strings.TrimSpace(c.Param("request_id"))
+	if requestID == "" {
+		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+			Error: handlers.ErrorDetail{
+				Message: "Invalid request: request_id is required",
+				Type:    "invalid_request_error",
+			},
+		})
+		return
+	}
+
+	rawJSON, err := readXAIVideosNativeRequest(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+			Error: handlers.ErrorDetail{
+				Message: fmt.Sprintf("Invalid request: %v", err),
+				Type:    "invalid_request_error",
+			},
+		})
+		return
+	}
+
+	rawJSON, _ = sjson.SetBytes(rawJSON, "request_id", requestID)
+
+	videoModel := strings.TrimSpace(gjson.GetBytes(rawJSON, "model").String())
+	if videoModel == "" {
+		videoModel = h.modelWithVideoAuthBinding(requestID, defaultXAIVideosModel)
+	}
+	routingModel := routingXAIVideosModel(videoModel)
+
+	c.Header("Content-Type", "application/json")
+	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
+	cliCtx = h.contextWithVideoAuthBinding(cliCtx, requestID)
+	selectedAuthID := ""
+	cliCtx = handlers.WithSelectedAuthIDCallback(cliCtx, func(authID string) {
+		selectedAuthID = authID
+	})
+	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
+	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, xaiVideosHandlerType, routingModel, rawJSON, "videos/remix")
+	stopKeepAlive()
+	if errMsg != nil {
+		h.WriteErrorResponse(c, errMsg)
+		if errMsg.Error != nil {
+			cliCancel(errMsg.Error)
+		} else {
+			cliCancel(nil)
+		}
+		return
+	}
+	h.bindVideoAuthIDAndModelFromPayload(resp, selectedAuthID, routingModel)
+	handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
+	_, _ = c.Writer.Write(resp)
+	cliCancel(nil)
+}
+
+// XAIVideosCreateCharacter handles POST /v1/videos/characters — creates a character from a video.
+func (h *OpenAIAPIHandler) XAIVideosCreateCharacter(c *gin.Context) {
+	rawJSON, err := readXAIVideosNativeRequest(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+			Error: handlers.ErrorDetail{
+				Message: fmt.Sprintf("Invalid request: %v", err),
+				Type:    "invalid_request_error",
+			},
+		})
+		return
+	}
+
+	c.Header("Content-Type", "application/json")
+	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
+	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
+	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, xaiVideosHandlerType, defaultXAIVideosModel, rawJSON, "videos/characters/create")
+	stopKeepAlive()
+	if errMsg != nil {
+		h.WriteErrorResponse(c, errMsg)
+		if errMsg.Error != nil {
+			cliCancel(errMsg.Error)
+		} else {
+			cliCancel(nil)
+		}
+		return
+	}
+	handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
+	_, _ = c.Writer.Write(resp)
+	cliCancel(nil)
+}
+
+// XAIVideosGetCharacter handles GET /v1/videos/characters/:character_id — fetches a character.
+func (h *OpenAIAPIHandler) XAIVideosGetCharacter(c *gin.Context) {
+	characterID := strings.TrimSpace(c.Param("character_id"))
+	if characterID == "" {
+		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+			Error: handlers.ErrorDetail{
+				Message: "Invalid request: character_id is required",
+				Type:    "invalid_request_error",
+			},
+		})
+		return
+	}
+
+	payload := []byte(`{}`)
+	payload, _ = sjson.SetBytes(payload, "character_id", characterID)
+
+	c.Header("Content-Type", "application/json")
+	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
+	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
+	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, xaiVideosHandlerType, defaultXAIVideosModel, payload, "videos/characters/get")
+	stopKeepAlive()
+	if errMsg != nil {
+		h.WriteErrorResponse(c, errMsg)
+		if errMsg.Error != nil {
+			cliCancel(errMsg.Error)
+		} else {
+			cliCancel(nil)
+		}
+		return
+	}
+	handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
+	_, _ = c.Writer.Write(resp)
 	cliCancel(nil)
 }

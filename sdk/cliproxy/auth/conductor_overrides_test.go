@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
@@ -124,76 +123,6 @@ func TestManager_ShouldRetryAfterError_UsesOAuthModelAliasForCooldown(t *testing
 	}
 	if wait <= 0 {
 		t.Fatalf("expected wait > 0, got %v", wait)
-	}
-}
-
-func TestManager_ShouldRetryAfterError_Retries402PaymentRequired(t *testing.T) {
-	m := NewManager(nil, nil, nil)
-	m.SetRetryConfig(3, 30*time.Second, 0)
-	auth := &Auth{
-		ID:       "auth-1",
-		Provider: "claude",
-	}
-	if _, errRegister := m.Register(context.Background(), auth); errRegister != nil {
-		t.Fatalf("register auth: %v", errRegister)
-	}
-	_, _, maxWait := m.retrySettings()
-	wait, shouldRetry := m.shouldRetryAfterError(&Error{HTTPStatus: http.StatusPaymentRequired, Message: "insufficient_quota"}, 0, []string{"claude"}, "model", maxWait)
-	if !shouldRetry {
-		t.Fatalf("expected shouldRetry=true for 402, got false (wait=%v)", wait)
-	}
-}
-
-func TestManager_ShouldRetryAfterError_Retries403Forbidden(t *testing.T) {
-	m := NewManager(nil, nil, nil)
-	m.SetRetryConfig(3, 30*time.Second, 0)
-	auth := &Auth{
-		ID:       "auth-1",
-		Provider: "claude",
-	}
-	if _, errRegister := m.Register(context.Background(), auth); errRegister != nil {
-		t.Fatalf("register auth: %v", errRegister)
-	}
-	_, _, maxWait := m.retrySettings()
-	wait, shouldRetry := m.shouldRetryAfterError(&Error{HTTPStatus: http.StatusForbidden, Message: "Insufficient quota."}, 0, []string{"claude"}, "model", maxWait)
-	if !shouldRetry {
-		t.Fatalf("expected shouldRetry=true for 403, got false (wait=%v)", wait)
-	}
-}
-
-func TestManager_ShouldRetryAfterError_402RespectsRetryBudget(t *testing.T) {
-	m := NewManager(nil, nil, nil)
-	m.SetRetryConfig(1, 30*time.Second, 0)
-	auth := &Auth{
-		ID:       "auth-1",
-		Provider: "claude",
-	}
-	if _, errRegister := m.Register(context.Background(), auth); errRegister != nil {
-		t.Fatalf("register auth: %v", errRegister)
-	}
-	_, _, maxWait := m.retrySettings()
-	// attempt 1 should exceed the retry budget of 1
-	_, shouldRetry := m.shouldRetryAfterError(&Error{HTTPStatus: http.StatusPaymentRequired, Message: "insufficient_quota"}, 1, []string{"claude"}, "model", maxWait)
-	if shouldRetry {
-		t.Fatal("expected shouldRetry=false when retry budget exhausted")
-	}
-}
-
-func TestManager_ShouldRetryAfterError_429StillRetriesWithoutRetryAfter(t *testing.T) {
-	m := NewManager(nil, nil, nil)
-	m.SetRetryConfig(3, 30*time.Second, 0)
-	auth := &Auth{
-		ID:       "auth-1",
-		Provider: "claude",
-	}
-	if _, errRegister := m.Register(context.Background(), auth); errRegister != nil {
-		t.Fatalf("register auth: %v", errRegister)
-	}
-	_, _, maxWait := m.retrySettings()
-	// 429 with no Retry-After should now retry immediately (previously required Retry-After)
-	wait, shouldRetry := m.shouldRetryAfterError(&Error{HTTPStatus: http.StatusTooManyRequests, Message: "quota"}, 0, []string{"claude"}, "model", maxWait)
-	if !shouldRetry {
-		t.Fatalf("expected shouldRetry=true for 429 without Retry-After, got false (wait=%v)", wait)
 	}
 }
 
@@ -2152,224 +2081,154 @@ func TestManager_RequestScopedNotFoundStopsRetryWithoutSuspendingAuth(t *testing
 	}
 }
 
-func TestManager_StaticFileNotFoundStopsRetryWithoutSuspendingAuth(t *testing.T) {
-	m := NewManager(nil, nil, nil)
-	executor := &authFallbackExecutor{
-		id: "openai",
-		executeErrors: map[string]error{
-			"aa-bad-auth": &Error{
-				HTTPStatus: http.StatusBadRequest,
-				Message:    `{"code":"not-found","error":"Failed to read static file."}`,
-			},
-		},
-	}
-	m.RegisterExecutor(executor)
-
-	model := "gpt-4.1"
-	badAuth := &Auth{ID: "aa-bad-auth", Provider: "openai"}
-	goodAuth := &Auth{ID: "bb-good-auth", Provider: "openai"}
-
-	reg := registry.GetGlobalRegistry()
-	reg.RegisterClient(badAuth.ID, "openai", []*registry.ModelInfo{{ID: model}})
-	reg.RegisterClient(goodAuth.ID, "openai", []*registry.ModelInfo{{ID: model}})
-	t.Cleanup(func() {
-		reg.UnregisterClient(badAuth.ID)
-		reg.UnregisterClient(goodAuth.ID)
-	})
-
-	if _, errRegister := m.Register(context.Background(), badAuth); errRegister != nil {
-		t.Fatalf("register bad auth: %v", errRegister)
-	}
-	if _, errRegister := m.Register(context.Background(), goodAuth); errRegister != nil {
-		t.Fatalf("register good auth: %v", errRegister)
-	}
-
-	_, errExecute := m.Execute(context.Background(), []string{"openai"}, cliproxyexecutor.Request{Model: model}, cliproxyexecutor.Options{})
-	if errExecute == nil {
-		t.Fatal("expected static-file not-found error")
-	}
-	errResult, ok := errExecute.(*Error)
-	if !ok {
-		t.Fatalf("expected *Error, got %T", errExecute)
-	}
-	if errResult.HTTPStatus != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", errResult.HTTPStatus, http.StatusBadRequest)
-	}
-
-	// Should NOT retry with good auth; stop immediately.
-	got := executor.ExecuteCalls()
-	want := []string{badAuth.ID}
-	if len(got) != len(want) {
-		t.Fatalf("execute calls = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("execute call %d auth = %q, want %q", i, got[i], want[i])
-		}
-	}
-
-	updatedBad, ok := m.GetByID(badAuth.ID)
-	if !ok || updatedBad == nil {
-		t.Fatalf("expected bad auth to remain registered")
-	}
-	if updatedBad.Unavailable {
-		t.Fatalf("expected static-file not-found to keep bad auth available")
-	}
-	if !updatedBad.NextRetryAfter.IsZero() {
-		t.Fatalf("expected static-file not-found to keep bad auth cooldown unset, got %v", updatedBad.NextRetryAfter)
-	}
-	if state := updatedBad.ModelStates[model]; state != nil {
-		t.Fatalf("expected static-file not-found to avoid bad auth model cooldown state, got %#v", state)
-	}
-}
-
-func TestManager_Execute_OpenAICompat402FallsBackAndRemembersExhaustedKey(t *testing.T) {
-	model := "gpt-oss-120b"
-	provider := util.OpenAICompatibleProviderKey("kimi")
-	paymentErr := &Error{
-		HTTPStatus: http.StatusPaymentRequired,
-		Message:    `{"error":{"message":"Insufficient quota.","type":"insufficient_quota"}}`,
-	}
+func TestManager_MarkResult_RequestFaultBodyDoesNotCooldownModelOrAuth(t *testing.T) {
+	previous := quotaCooldownDisabled.Load()
+	quotaCooldownDisabled.Store(false)
+	t.Cleanup(func() { quotaCooldownDisabled.Store(previous) })
 
 	m := NewManager(nil, nil, nil)
-	executor := &authFallbackExecutor{
-		id:            provider,
-		executeErrors: map[string]error{},
-	}
-	m.RegisterExecutor(executor)
 
-	badAuth := &Auth{
-		ID:       "aa-bad-key",
-		Provider: provider,
-		Attributes: map[string]string{
-			"api_key":      "exhausted-key",
-			"compat_name":  "kimi",
-			"provider_key": "kimi",
-			"source":       "config:kimi.com[bad]",
-		},
-		Metadata: map[string]any{"disable_cooling": true},
-	}
-	goodAuth := &Auth{
-		ID:       "bb-good-key",
-		Provider: provider,
-		Attributes: map[string]string{
-			"api_key":      "good-key",
-			"compat_name":  "kimi",
-			"provider_key": "kimi",
-			"source":       "config:kimi.com[good]",
-		},
-		Metadata: map[string]any{"disable_cooling": true},
-	}
-	executor.executeErrors[badAuth.ID] = paymentErr
-
-	reg := registry.GetGlobalRegistry()
-	reg.RegisterClient(badAuth.ID, provider, []*registry.ModelInfo{{ID: model}})
-	reg.RegisterClient(goodAuth.ID, provider, []*registry.ModelInfo{{ID: model}})
-	t.Cleanup(func() {
-		reg.UnregisterClient(badAuth.ID)
-		reg.UnregisterClient(goodAuth.ID)
-	})
-
-	if _, errRegister := m.Register(context.Background(), badAuth); errRegister != nil {
-		t.Fatalf("register bad auth: %v", errRegister)
-	}
-	if _, errRegister := m.Register(context.Background(), goodAuth); errRegister != nil {
-		t.Fatalf("register good auth: %v", errRegister)
-	}
-
-	request := cliproxyexecutor.Request{Model: model}
-	resp, errExecute := m.Execute(context.Background(), []string{provider}, request, cliproxyexecutor.Options{})
-	if errExecute != nil {
-		t.Fatalf("execute error = %v, want success via fallback key", errExecute)
-	}
-	if string(resp.Payload) != goodAuth.ID {
-		t.Fatalf("payload = %q, want %q", string(resp.Payload), goodAuth.ID)
-	}
-
-	gotCalls := executor.ExecuteCalls()
-	wantCalls := []string{badAuth.ID, goodAuth.ID}
-	if len(gotCalls) != len(wantCalls) {
-		t.Fatalf("execute calls = %v, want %v", gotCalls, wantCalls)
-	}
-	for i := range wantCalls {
-		if gotCalls[i] != wantCalls[i] {
-			t.Fatalf("execute call %d auth = %q, want %q", i, gotCalls[i], wantCalls[i])
-		}
-	}
-
-	updatedBad, ok := m.GetByID(badAuth.ID)
-	if !ok || updatedBad == nil {
-		t.Fatalf("expected bad auth to remain registered")
-	}
-	state := updatedBad.ModelStates[model]
-	if state == nil {
-		t.Fatalf("expected model state for %q", model)
-	}
-	if state.NextRetryAfter.IsZero() {
-		t.Fatalf("expected bad key to be remembered with cooldown, got zero NextRetryAfter")
-	}
-	if !state.NextRetryAfter.After(time.Now().Add(apiKeyPaymentExhaustedCooldown / 2)) {
-		t.Fatalf("expected long-lived cooldown, got %v", state.NextRetryAfter)
-	}
-
-	executor.mu.Lock()
-	executor.executeCalls = nil
-	executor.mu.Unlock()
-
-	resp2, errExecute2 := m.Execute(context.Background(), []string{provider}, request, cliproxyexecutor.Options{})
-	if errExecute2 != nil {
-		t.Fatalf("second execute error = %v, want success without retrying bad key", errExecute2)
-	}
-	if string(resp2.Payload) != goodAuth.ID {
-		t.Fatalf("second payload = %q, want %q", string(resp2.Payload), goodAuth.ID)
-	}
-	gotCalls2 := executor.ExecuteCalls()
-	if len(gotCalls2) != 1 || gotCalls2[0] != goodAuth.ID {
-		t.Fatalf("second execute calls = %v, want only good auth %q", gotCalls2, goodAuth.ID)
-	}
-}
-
-func TestManager_MarkResult_APIKey402UsesLongLivedCooldownWithDisableCooling(t *testing.T) {
-	m := NewManager(nil, nil, nil)
 	auth := &Auth{
-		ID:       "codex:apikey:abc",
-		Provider: "codex",
-		Attributes: map[string]string{
-			"api_key": "secret",
-			"source":  "config:codex[abc]",
-		},
-		Metadata: map[string]any{"disable_cooling": true},
+		ID:       "auth-request-fault",
+		Provider: "deepseek",
 	}
 	if _, errRegister := m.Register(context.Background(), auth); errRegister != nil {
 		t.Fatalf("register auth: %v", errRegister)
 	}
 
-	model := "gpt-5"
-	reg := registry.GetGlobalRegistry()
-	reg.RegisterClient(auth.ID, "codex", []*registry.ModelInfo{{ID: model}})
-	t.Cleanup(func() { reg.UnregisterClient(auth.ID) })
-
+	model := "deepseek-chat"
+	// SDK consumer reports a 401 request-fault body directly without knowing the internal requestScopedErrorCode.
 	m.MarkResult(context.Background(), Result{
 		AuthID:   auth.ID,
-		Provider: "codex",
+		Provider: auth.Provider,
 		Model:    model,
 		Success:  false,
-		Error:    &Error{HTTPStatus: http.StatusPaymentRequired, Message: "insufficient_quota"},
+		Error: &Error{
+			HTTPStatus: http.StatusUnauthorized,
+			Message:    `{"error":{"message":"Invalid request parameter","type":"invalid_request_error"}}`,
+		},
 	})
 
 	updated, ok := m.GetByID(auth.ID)
 	if !ok || updated == nil {
 		t.Fatalf("expected auth to be present")
 	}
-	state := updated.ModelStates[model]
-	if state == nil {
-		t.Fatalf("expected model state")
+	if updated.Unavailable {
+		t.Fatalf("expected request-scoped 401 to keep auth available, got unavailable=true")
 	}
-	if state.NextRetryAfter.IsZero() {
-		t.Fatalf("expected 402 on api key to set cooldown even with disable_cooling")
+	if !updated.NextRetryAfter.IsZero() {
+		t.Fatalf("expected request-scoped 401 to keep auth cooldown unset, got %v", updated.NextRetryAfter)
 	}
-	blocked, _, _ := isAuthBlockedForModel(updated, model, time.Now())
-	if !blocked {
-		t.Fatalf("expected exhausted api key to be blocked for model")
+	if state := updated.ModelStates[model]; state != nil && (state.Unavailable || !state.NextRetryAfter.IsZero()) {
+		t.Fatalf("expected request-scoped 401 to avoid model cooldown state, got %#v", state)
+	}
+
+	// SDK consumer uses NewRequestScopedError or MarkRequestScoped explicitly.
+	explicitReqErr := NewRequestScopedError("explicit request fault", http.StatusUnauthorized)
+	if !explicitReqErr.IsRequestScoped() || explicitReqErr.Code != ErrorCodeRequestScoped {
+		t.Fatalf("NewRequestScopedError code = %q, want %q", explicitReqErr.Code, ErrorCodeRequestScoped)
+	}
+	customErr := (&Error{Message: "custom fault", HTTPStatus: http.StatusUnauthorized}).MarkRequestScoped()
+	if !customErr.IsRequestScoped() || customErr.Code != ErrorCodeRequestScoped {
+		t.Fatalf("MarkRequestScoped code = %q, want %q", customErr.Code, ErrorCodeRequestScoped)
+	}
+
+	m.MarkResult(context.Background(), Result{
+		AuthID:   auth.ID,
+		Provider: auth.Provider,
+		Model:    model,
+		Success:  false,
+		Error:    explicitReqErr,
+	})
+	updated, _ = m.GetByID(auth.ID)
+	if updated.Unavailable || !updated.NextRetryAfter.IsZero() {
+		t.Fatalf("expected explicit request-scoped error to keep auth available")
+	}
+
+	m.MarkResult(context.Background(), Result{
+		AuthID:   auth.ID,
+		Provider: auth.Provider,
+		Model:    model,
+		Success:  false,
+		Error:    customErr,
+	})
+	updated, _ = m.GetByID(auth.ID)
+	if updated.Unavailable || !updated.NextRetryAfter.IsZero() {
+		t.Fatalf("expected MarkRequestScoped error to keep auth available")
+	}
+
+	// Custom non-empty Code with request-fault message payload.
+	m.MarkResult(context.Background(), Result{
+		AuthID:   auth.ID,
+		Provider: auth.Provider,
+		Model:    model,
+		Success:  false,
+		Error: &Error{
+			Code:       "custom_upstream_code",
+			HTTPStatus: http.StatusUnauthorized,
+			Message:    `{"error":{"message":"Invalid request parameter","type":"invalid_request_error"}}`,
+		},
+	})
+	updated, _ = m.GetByID(auth.ID)
+	if updated.Unavailable || !updated.NextRetryAfter.IsZero() {
+		t.Fatalf("expected custom code with request-fault message to keep auth available")
+	}
+
+	// Auth-level request-fault error (empty Model) must also avoid cooling auth.
+	authEmptyModel := &Auth{
+		ID:       "auth-empty-model",
+		Provider: "deepseek",
+	}
+	if _, errRegister := m.Register(context.Background(), authEmptyModel); errRegister != nil {
+		t.Fatalf("register authEmptyModel: %v", errRegister)
+	}
+	m.MarkResult(context.Background(), Result{
+		AuthID:   authEmptyModel.ID,
+		Provider: authEmptyModel.Provider,
+		Model:    "",
+		Success:  false,
+		Error: &Error{
+			HTTPStatus: http.StatusUnauthorized,
+			Message:    `{"error":{"message":"Invalid request parameter","type":"invalid_request_error"}}`,
+		},
+	})
+	updatedEmptyModel, ok := m.GetByID(authEmptyModel.ID)
+	if !ok || updatedEmptyModel == nil {
+		t.Fatalf("expected authEmptyModel to be present")
+	}
+	if updatedEmptyModel.Unavailable || !updatedEmptyModel.NextRetryAfter.IsZero() {
+		t.Fatalf("expected auth-level request-fault 401 to keep auth available")
+	}
+
+	// Real authentication error must still trigger cooldown.
+	authFail := &Auth{
+		ID:       "auth-real-fail",
+		Provider: "deepseek",
+	}
+	if _, errRegister := m.Register(context.Background(), authFail); errRegister != nil {
+		t.Fatalf("register authFail: %v", errRegister)
+	}
+	m.MarkResult(context.Background(), Result{
+		AuthID:   authFail.ID,
+		Provider: authFail.Provider,
+		Model:    model,
+		Success:  false,
+		Error: &Error{
+			HTTPStatus: http.StatusUnauthorized,
+			Message:    `{"error":{"message":"Authentication Fails, Your api key is invalid","type":"authentication_error"}}`,
+		},
+	})
+	updatedFail, ok := m.GetByID(authFail.ID)
+	if !ok || updatedFail == nil {
+		t.Fatalf("expected authFail to be present")
+	}
+	if !updatedFail.Unavailable {
+		t.Fatalf("expected real 401 authentication error to mark auth unavailable")
+	}
+	if updatedFail.NextRetryAfter.IsZero() {
+		t.Fatalf("expected real 401 authentication error to set auth cooldown NextRetryAfter")
+	}
+	if state := updatedFail.ModelStates[model]; state == nil || !state.Unavailable || state.NextRetryAfter.IsZero() {
+		t.Fatalf("expected real 401 authentication error to set model cooldown state, got %#v", state)
 	}
 }

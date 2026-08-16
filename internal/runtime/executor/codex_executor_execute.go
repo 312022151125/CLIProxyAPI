@@ -203,6 +203,9 @@ codexReadExecuteResponse:
 		var param any
 		clientCompletedData := applyCodexIdentityExposeResponsePayload(completedData, identityState)
 		out := sdktranslator.TranslateNonStream(ctx, to, responseFormat, req.Model, originalPayload, body, clientCompletedData, &param)
+		if responseFormat == sdktranslator.FormatOpenAIResponse {
+			out = helps.EnsureResponsesUsageDetails(out)
+		}
 		resp = cliproxyexecutor.Response{Payload: out, Headers: httpResp.Header.Clone()}
 		return resp, nil
 	}
@@ -336,6 +339,9 @@ codexReadCompactResponse:
 	var param any
 	clientData := applyCodexIdentityExposeResponsePayload(upstreamData, identityState)
 	out := sdktranslator.TranslateNonStream(ctx, to, responseFormat, req.Model, originalPayload, body, clientData, &param)
+	if responseFormat == sdktranslator.FormatOpenAIResponse {
+		out = helps.EnsureResponsesUsageDetails(out)
+	}
 	resp = cliproxyexecutor.Response{Payload: out, Headers: httpResp.Header.Clone()}
 	return resp, nil
 }

@@ -37,6 +37,7 @@ const (
 	xaiImagesDefaultResolution  = "1k"
 	imagesGenerationsPath       = "/v1/images/generations"
 	imagesEditsPath             = "/v1/images/edits"
+	imagesVariationsPath        = "/v1/images/variations"
 )
 
 type imageCallResult struct {
@@ -263,7 +264,7 @@ func rejectUnsupportedImagesModel(c *gin.Context, model string) bool {
 
 	c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
 		Error: handlers.ErrorDetail{
-			Message: fmt.Sprintf("Model %s is not supported on %s or %s. Use %s, %s, %s, %s, %s, or a configured openai-compatibility image model.", model, imagesGenerationsPath, imagesEditsPath, gptImage15Model, defaultImagesToolModel, defaultXAIImagesModel, xaiImagesQualityModel, xaiImages20Model),
+			Message: fmt.Sprintf("Model %s is not supported on %s, %s, or %s. Use %s, %s, %s, %s, %s, or a configured openai-compatibility image model.", model, imagesGenerationsPath, imagesEditsPath, imagesVariationsPath, gptImage15Model, defaultImagesToolModel, defaultXAIImagesModel, xaiImagesQualityModel, xaiImages20Model),
 			Type:    "invalid_request_error",
 		},
 	})
@@ -1033,6 +1034,137 @@ func (h *OpenAIAPIHandler) imagesEditsFromJSON(c *gin.Context) {
 		return
 	}
 	h.collectImagesFromResponses(c, responsesReq, responseFormat)
+}
+
+// ImagesVariations handles POST /v1/images/variations.
+//
+// The OpenAI Images variations endpoint accepts a multipart/form-data request
+// containing an uploaded image and produces alternative versions of it.
+// Unlike edits, no prompt is required.
+//
+// For openai-compatibility providers the raw multipart body is forwarded
+// verbatim to POST {base-url}/images/variations.
+// For xAI or codex providers the request is forwarded via the routed images path.
+func (h *OpenAIAPIHandler) ImagesVariations(c *gin.Context) {
+	if h != nil && h.BaseAPIHandler != nil && h.BaseAPIHandler.Cfg != nil && h.BaseAPIHandler.Cfg.DisableImageGeneration == internalconfig.DisableImageGenerationAll {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+
+	form, err := c.MultipartForm()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+			Error: handlers.ErrorDetail{
+				Message: fmt.Sprintf("Invalid request: %v", err),
+				Type:    "invalid_request_error",
+			},
+		})
+		return
+	}
+
+	imageModel := strings.TrimSpace(c.PostForm("model"))
+	if imageModel == "" {
+		imageModel = defaultImagesToolModel
+	}
+	if rejectUnsupportedImagesModel(c, imageModel) {
+		return
+	}
+
+	var imageFiles []*multipart.FileHeader
+	if files := form.File["image[]"]; len(files) > 0 {
+		imageFiles = files
+	} else if files := form.File["image"]; len(files) > 0 {
+		imageFiles = files
+	}
+	if len(imageFiles) == 0 {
+		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+			Error: handlers.ErrorDetail{
+				Message: "Invalid request: image is required",
+				Type:    "invalid_request_error",
+			},
+		})
+		return
+	}
+
+	responseFormat := strings.TrimSpace(c.PostForm("response_format"))
+	if responseFormat == "" {
+		responseFormat = "b64_json"
+	}
+	stream := parseBoolField(c.PostForm("stream"), false)
+
+	// openai-compatibility provider: forward the full multipart body to upstream /images/variations.
+	if isOpenAICompatImagesModel(imageModel) {
+		compatReq, contentType, errBuild := buildOpenAICompatImagesMultipartRequest(form, imageModel, stream)
+		if errBuild != nil {
+			c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+				Error: handlers.ErrorDetail{
+					Message: fmt.Sprintf("Invalid request: %v", errBuild),
+					Type:    "invalid_request_error",
+				},
+			})
+			return
+		}
+		c.Request.Header.Set("Content-Type", contentType)
+		h.handleOpenAICompatImages(c, compatReq, imageModel, responseFormat, "image_variation", stream)
+		return
+	}
+
+	// codex / routed providers: forward the full multipart body.
+	if isCodexImagesToolModel(imageModel) {
+		imageReq, contentType, errBuild := buildOpenAICompatImagesMultipartRequest(form, imageModel, stream)
+		if errBuild != nil {
+			c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+				Error: handlers.ErrorDetail{
+					Message: fmt.Sprintf("Invalid request: %v", errBuild),
+					Type:    "invalid_request_error",
+				},
+			})
+			return
+		}
+		c.Request.Header.Set("Content-Type", contentType)
+		h.handleRoutedImages(c, imageReq, imageModel, stream)
+		return
+	}
+
+	// xAI: convert the uploaded image to a data URL and call the generations endpoint.
+	// xAI does not have a native variations endpoint; use image-to-image edit instead.
+	if isXAIImagesModel(imageModel) {
+		images := make([]string, 0, len(imageFiles))
+		for _, fh := range imageFiles {
+			dataURL, errDataURL := multipartFileToDataURL(fh)
+			if errDataURL != nil {
+				c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+					Error: handlers.ErrorDetail{
+						Message: fmt.Sprintf("Invalid request: %v", errDataURL),
+						Type:    "invalid_request_error",
+					},
+				})
+				return
+			}
+			images = append(images, dataURL)
+		}
+		aspectRatio := xaiImagesAspectRatioFromSize(c.PostForm("size"), "")
+		resolution := xaiImagesResolution(c.PostForm("resolution"), c.PostForm("size"), "")
+		n := parseIntField(c.PostForm("n"), 0)
+		// Use an empty prompt — xAI edit is used as a best-effort variation proxy.
+		xaiReq := buildXAIImagesEditRequest(imageModel, "", images, responseFormat, aspectRatio, resolution, n)
+		h.handleXAIImages(c, xaiReq, responseFormat, "image_variation", stream)
+		return
+	}
+
+	// Default (Codex/Responses-based providers): forward raw multipart body through image-edit tool.
+	imageReq, contentType, errBuild := buildOpenAICompatImagesMultipartRequest(form, imageModel, stream)
+	if errBuild != nil {
+		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+			Error: handlers.ErrorDetail{
+				Message: fmt.Sprintf("Invalid request: %v", errBuild),
+				Type:    "invalid_request_error",
+			},
+		})
+		return
+	}
+	c.Request.Header.Set("Content-Type", contentType)
+	h.handleRoutedImages(c, imageReq, imageModel, stream)
 }
 
 func buildGeminiChatImagesRequest(prompt, model string) []byte {

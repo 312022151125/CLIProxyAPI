@@ -46,7 +46,7 @@ func assertUnsupportedImagesModelResponse(t *testing.T, resp *httptest.ResponseR
 	}
 
 	message := gjson.GetBytes(resp.Body.Bytes(), "error.message").String()
-	expectedMessage := "Model " + model + " is not supported on " + imagesGenerationsPath + " or " + imagesEditsPath + ". Use " + gptImage15Model + ", " + defaultImagesToolModel + ", " + defaultXAIImagesModel + ", " + xaiImagesQualityModel + ", " + xaiImages20Model + ", or a configured openai-compatibility image model."
+	expectedMessage := "Model " + model + " is not supported on " + imagesGenerationsPath + ", " + imagesEditsPath + ", or " + imagesVariationsPath + ". Use " + gptImage15Model + ", " + defaultImagesToolModel + ", " + defaultXAIImagesModel + ", " + xaiImagesQualityModel + ", " + xaiImages20Model + ", or a configured openai-compatibility image model."
 	if message != expectedMessage {
 		t.Fatalf("error message = %q, want %q", message, expectedMessage)
 	}
@@ -557,4 +557,99 @@ func TestSSEFrameAccumulatorKeepsMultipleFramesDistinct(t *testing.T) {
 	if string(frames[0]) != first || string(frames[1]) != second {
 		t.Fatalf("frames were overwritten during buffer compaction: %q", frames)
 	}
+}
+
+// buildVariationsMultipartBody creates a multipart body with a minimal PNG image.
+// Used for variation tests that don't need a real image to pass validation.
+func buildVariationsMultipartBody(t *testing.T, model string) (*bytes.Buffer, string) {
+	t.Helper()
+	return buildVariationsMultipartBodyPNG(t, model)
+}
+
+func TestImagesVariationsRejectsUnsupportedModel(t *testing.T) {
+	handler := &OpenAIAPIHandler{}
+	body, contentType := buildVariationsMultipartBody(t, "gpt-5.4-mini")
+	resp := performImagesEndpointRequest(t, imagesVariationsPath, contentType, body, handler.ImagesVariations)
+	assertUnsupportedImagesModelResponse(t, resp, "gpt-5.4-mini")
+}
+
+func TestImagesVariationsRejectsMissingImage(t *testing.T) {
+	handler := &OpenAIAPIHandler{}
+	// Send form with only model field, no image.
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("model", defaultImagesToolModel)
+	_ = writer.Close()
+	resp := performImagesEndpointRequest(t, imagesVariationsPath, writer.FormDataContentType(), &body, handler.ImagesVariations)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", resp.Code, http.StatusBadRequest, resp.Body.String())
+	}
+	msg := gjson.GetBytes(resp.Body.Bytes(), "error.message").String()
+	if !strings.Contains(msg, "image is required") {
+		t.Fatalf("error message = %q, want to contain 'image is required'", msg)
+	}
+}
+
+func TestImagesVariations_DisableImageGeneration_Returns404(t *testing.T) {
+	base := handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{DisableImageGeneration: internalconfig.DisableImageGenerationAll}, nil)
+	handler := NewOpenAIAPIHandler(base)
+
+	body, contentType := buildVariationsMultipartBody(t, "")
+	resp := performImagesEndpointRequest(t, imagesVariationsPath, contentType, body, handler.ImagesVariations)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d: %s", resp.Code, http.StatusNotFound, resp.Body.String())
+	}
+}
+
+// TestImagesVariations_OpenAICompatModelIsSupported verifies that a model registered
+// with Type=OpenAIImageModelType is accepted by the variations handler at the
+// validation layer (i.e. not rejected as "unsupported model").
+func TestImagesVariations_OpenAICompatModelIsSupported(t *testing.T) {
+	const compatModel = "compat-image-model-var"
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient("test-variations-compat-2", "openai-compatibility", []*registry.ModelInfo{
+		{ID: compatModel, Type: registry.OpenAIImageModelType},
+	})
+	t.Cleanup(func() { reg.UnregisterClient("test-variations-compat-2") })
+
+	if !isOpenAICompatImagesModel(compatModel) {
+		t.Fatalf("expected %s to be detected as openai-compat image model", compatModel)
+	}
+	if !isSupportedImagesModel(compatModel) {
+		t.Fatalf("expected %s to pass isSupportedImagesModel", compatModel)
+	}
+}
+
+// buildVariationsMultipartBodyPNG builds a real multipart body with a 1×1 PNG.
+func buildVariationsMultipartBodyPNG(t *testing.T, model string) (*bytes.Buffer, string) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if model != "" {
+		_ = writer.WriteField("model", model)
+	}
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", `form-data; name="image"; filename="test.png"`)
+	h.Set("Content-Type", "image/png")
+	fw, err := writer.CreatePart(h)
+	if err != nil {
+		t.Fatalf("create image part: %v", err)
+	}
+	// minimal valid 1×1 PNG bytes (67 bytes)
+	pngBytes := []byte{
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk length+type
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1×1
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, // bit depth 8, RGB
+		0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, // IDAT chunk
+		0x54, 0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00,
+		0x00, 0x00, 0x02, 0x00, 0x01, 0xE2, 0x21, 0xBC,
+		0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, // IEND chunk
+		0x44, 0xAE, 0x42, 0x60, 0x82,
+	}
+	if _, err := fw.Write(pngBytes); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+	_ = writer.Close()
+	return &body, writer.FormDataContentType()
 }

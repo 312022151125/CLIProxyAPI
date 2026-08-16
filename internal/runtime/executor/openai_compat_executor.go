@@ -33,6 +33,7 @@ const (
 	openAICompatImageHandlerType            = "openai-image"
 	openAICompatImagesGenerationsPath       = "/images/generations"
 	openAICompatImagesEditsPath             = "/images/edits"
+	openAICompatImagesVariationsPath        = "/images/variations"
 	openAICompatDefaultImageEndpoint        = openAICompatImagesGenerationsPath
 	openAICompatMultipartMemory       int64 = 32 << 20
 
@@ -828,6 +829,9 @@ func openAICompatImageEndpointPath(opts cliproxyexecutor.Options) string {
 	path := helps.PayloadRequestPath(opts)
 	if strings.HasSuffix(path, "/images/edits") {
 		return openAICompatImagesEditsPath
+	}
+	if strings.HasSuffix(path, "/images/variations") {
+		return openAICompatImagesVariationsPath
 	}
 	if strings.HasSuffix(path, "/images/generations") {
 		return openAICompatImagesGenerationsPath

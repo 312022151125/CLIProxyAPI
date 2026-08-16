@@ -421,3 +421,79 @@ func TestOpenAICompatExecutorVideoUpstreamError(t *testing.T) {
 		t.Fatal("expected error for 422 upstream, got nil")
 	}
 }
+
+// TestOpenAICompatImageEndpointPathVariations verifies that /images/variations
+// is correctly mapped to the upstream endpoint path.
+func TestOpenAICompatImageEndpointPathVariations(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		requestPath string
+		wantEp      string
+	}{
+		{"/v1/images/generations", openAICompatImagesGenerationsPath},
+		{"/v1/images/edits", openAICompatImagesEditsPath},
+		{"/v1/images/variations", openAICompatImagesVariationsPath},
+		// unknown path falls back to default (generations)
+		{"/v1/images/unknown", openAICompatDefaultImageEndpoint},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.requestPath, func(t *testing.T) {
+			t.Parallel()
+			opts := cliproxyexecutor.Options{
+				SourceFormat: sdktranslator.FromString(openAICompatImageHandlerType),
+				Metadata: map[string]any{
+					cliproxyexecutor.RequestPathMetadataKey: tc.requestPath,
+				},
+			}
+			got := openAICompatImageEndpointPath(opts)
+			if got != tc.wantEp {
+				t.Errorf("path=%q: endpoint = %q, want %q", tc.requestPath, got, tc.wantEp)
+			}
+		})
+	}
+}
+
+// TestOpenAICompatExecutorImageVariations verifies that a POST /images/variations
+// request is forwarded as POST {base}/images/variations by the executor.
+func TestOpenAICompatExecutorImageVariations(t *testing.T) {
+	t.Parallel()
+	var gotMethod, gotPath string
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":1,"data":[{"b64_json":"abc"}]}`))
+	}))
+	defer server.Close()
+
+	ex := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL + "/v1",
+		"api_key":  "test-key",
+	}}
+	payload := []byte(`{"model":"dall-e-2","n":1}`)
+	_, err := ex.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "dall-e-2",
+		Payload: payload,
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString(openAICompatImageHandlerType),
+		Metadata: map[string]any{
+			cliproxyexecutor.RequestPathMetadataKey: "/v1/images/variations",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/v1/images/variations" {
+		t.Errorf("path = %q, want /v1/images/variations", gotPath)
+	}
+	if string(gotBody) != string(payload) {
+		t.Errorf("body = %s, want %s", string(gotBody), string(payload))
+	}
+}

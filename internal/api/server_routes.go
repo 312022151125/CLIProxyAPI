@@ -68,6 +68,7 @@ func (s *Server) setupRoutes() {
 		v1.POST("/embeddings", openaiHandlers.Embeddings)
 		v1.POST("/images/generations", openaiHandlers.ImagesGenerations)
 		v1.POST("/images/edits", openaiHandlers.ImagesEdits)
+		v1.POST("/images/variations", openaiHandlers.ImagesVariations)
 		v1.GET("/videos", openaiHandlers.XAIVideosList)
 		v1.POST("/videos", openaiHandlers.XAIVideosGenerations)
 		v1.POST("/videos/generations", openaiHandlers.XAIVideosGenerations)

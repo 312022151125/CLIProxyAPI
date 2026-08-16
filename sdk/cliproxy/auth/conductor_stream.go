@@ -129,6 +129,30 @@ func streamChunksHaveMarker(chunks []cliproxyexecutor.StreamChunk) (string, bool
 	return "", false
 }
 
+// peekStreamForTimeoutMarker non-blockingly drains items already queued in ch
+// and appends them to buffered. It stops as soon as a non-error chunk is found
+// so that real-data streams are not consumed. The updated buffered slice and
+// any remaining unconsumed channel are returned. closed is true when ch was
+// fully drained and closed.
+func peekStreamForTimeoutMarker(buffered []cliproxyexecutor.StreamChunk, ch <-chan cliproxyexecutor.StreamChunk) (newBuffered []cliproxyexecutor.StreamChunk, remaining <-chan cliproxyexecutor.StreamChunk, closed bool) {
+	for {
+		select {
+		case chunk, ok := <-ch:
+			if !ok {
+				return buffered, ch, true
+			}
+			buffered = append(buffered, chunk)
+			if chunk.Err == nil && len(chunk.Payload) > 0 {
+				// Real data arrived; stop peeking.
+				return buffered, ch, false
+			}
+		default:
+			// No item immediately available; stop non-blocking peek.
+			return buffered, ch, false
+		}
+	}
+}
+
 func (m *Manager) wrapStreamResult(ctx context.Context, auth *Auth, provider, resultModel string, headers http.Header, buffered []cliproxyexecutor.StreamChunk, remaining <-chan cliproxyexecutor.StreamChunk, aliasResult OAuthModelAliasResult, ephemeralResult bool, opts cliproxyexecutor.Options) *cliproxyexecutor.StreamResult {
 	out := make(chan cliproxyexecutor.StreamChunk)
 	go func() {
@@ -381,6 +405,13 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			m.recordExecutionResult(ctx, result, auth, ephemeralResult)
 			discardStreamChunks(streamResult.Chunks)
 			return nil, newStreamBootstrapError(bootstrapErr, streamResult.Headers)
+		}
+		// Non-blocking peek: if a timeout error is already queued immediately after
+		// the bootstrap chunk(s), drain it into buffered so streamChunksHaveMarker
+		// can detect the marker and trigger a retry rather than forwarding partial
+		// output to the caller.
+		if !closed {
+			buffered, _, closed = peekStreamForTimeoutMarker(buffered, streamResult.Chunks)
 		}
 		if markerText, hasMarker := streamChunksHaveMarker(buffered); hasMarker {
 			errTimeout := newUpstreamTimeoutError(markerText)

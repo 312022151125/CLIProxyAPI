@@ -7,6 +7,8 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 )
 
+func boolPtr(b bool) *bool { return &b }
+
 func TestComputeOpenAICompatModelsHash_Deterministic(t *testing.T) {
 	models := []config.OpenAICompatibilityModel{
 		{Name: "gpt-4", Alias: "gpt4"},
@@ -27,13 +29,14 @@ func TestComputeOpenAICompatModelsHash_Deterministic(t *testing.T) {
 }
 
 func TestComputeOpenAICompatModelsHash_IncludesImageFlag(t *testing.T) {
-	textModel := ComputeOpenAICompatModelsHash([]config.OpenAICompatibilityModel{{Name: "gpt-image", Alias: "image"}})
-	imageModel := ComputeOpenAICompatModelsHash([]config.OpenAICompatibilityModel{{Name: "gpt-image", Alias: "image", Image: true}})
-	if textModel == "" || imageModel == "" {
+	// nil (default=enabled) vs explicit false (disabled) must produce different hashes.
+	enabledModel := ComputeOpenAICompatModelsHash([]config.OpenAICompatibilityModel{{Name: "gpt-image", Alias: "image"}})
+	disabledModel := ComputeOpenAICompatModelsHash([]config.OpenAICompatibilityModel{{Name: "gpt-image", Alias: "image", Image: boolPtr(false)}})
+	if enabledModel == "" || disabledModel == "" {
 		t.Fatal("hashes should not be empty")
 	}
-	if textModel == imageModel {
-		t.Fatal("hash should change when image flag changes")
+	if enabledModel == disabledModel {
+		t.Fatal("hash should change when image flag is disabled")
 	}
 }
 

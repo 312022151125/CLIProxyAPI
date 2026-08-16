@@ -92,7 +92,7 @@ func IsRequestFault(status int, err error) bool {
 	if status == http.StatusUnauthorized && hasAuthenticationErrorBody(err) {
 		return false
 	}
-	if hasRequestFaultBody(err) {
+	if HasRequestFaultBody(err) {
 		return true
 	}
 	if err != nil && IsItemNotPersisted(err.Error()) {
@@ -140,7 +140,9 @@ func hasAuthenticationErrorBody(err error) bool {
 	return false
 }
 
-func hasRequestFaultBody(err error) bool {
+// HasRequestFaultBody reports whether err contains a structured JSON body with a
+// known request-fault code or type, independent of the HTTP status code.
+func HasRequestFaultBody(err error) bool {
 	if err == nil {
 		return false
 	}

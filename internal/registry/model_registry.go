@@ -81,6 +81,14 @@ type ModelInfo struct {
 	// IsCompat enables compatibility handling for this configured API-key model.
 	// It is internal metadata and is not exposed in model listings.
 	IsCompat bool `json:"-"`
+
+	// ImageDisabled marks this openai-compatibility model as not callable through
+	// /v1/images/* endpoints. Set when the user explicitly configures image: false.
+	ImageDisabled bool `json:"-"`
+
+	// VideoDisabled marks this openai-compatibility model as not callable through
+	// /v1/videos/* endpoints. Set when the user explicitly configures video: false.
+	VideoDisabled bool `json:"-"`
 }
 
 // ModelConfig holds optional runtime overrides for a model definition.

@@ -522,7 +522,8 @@ nonstream-keepalive-interval: 0
 #         alias: "kimi-k2"               # The alias used in the API.
 #         display-name: "Kimi K2"         # optional catalog display name
 #         max-context-length: 1048576    # optional: override Codex client context window metadata
-#         # image: false                 # deprecated: all openai-compatibility models support /v1/images/* and /v1/videos/* by default; this flag is no longer required
+#         # image: false                 # optional: set to false to disable /v1/images/* for this model (default: true)
+#         # video: false                 # optional: set to false to disable /v1/videos/* for this model (default: true)
 #         input-modalities: [text, image] # optional: declare /v1/chat/completions and /v1/responses multimodal input for Codex clients. Use [text] for upstreams that reject multimodal tool result content.
 #         output-modalities: [text]       # optional: declare output modalities when known
 #         is-compat: false                # optional: preserve Claude thinking blocks for compatible upstreams

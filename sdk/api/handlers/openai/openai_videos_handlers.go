@@ -173,7 +173,10 @@ func isOpenAICompatVideosModel(model string) bool {
 	if info == nil {
 		return false
 	}
-	// Any openai-compatibility model (including image-flagged) supports video by default.
+	// Accept any openai-compatibility model unless videos are explicitly disabled.
+	if info.VideoDisabled {
+		return false
+	}
 	return info.Type == "openai-compatibility" || info.Type == registry.OpenAIImageModelType
 }
 

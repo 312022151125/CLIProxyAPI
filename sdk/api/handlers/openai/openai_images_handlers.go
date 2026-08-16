@@ -257,8 +257,10 @@ func isOpenAICompatImagesModel(model string) bool {
 	if info == nil {
 		return false
 	}
-	// Accept both explicit image-flagged models (OpenAIImageModelType) and any
-	// openai-compatibility model — images are enabled by default for compat providers.
+	// Accept any openai-compatibility model unless images are explicitly disabled.
+	if info.ImageDisabled {
+		return false
+	}
 	return info.Type == registry.OpenAIImageModelType || info.Type == "openai-compatibility"
 }
 

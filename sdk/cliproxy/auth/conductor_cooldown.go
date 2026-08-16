@@ -1796,6 +1796,17 @@ func isRequestInvalidError(err error) bool {
 		return false
 	}
 	status := statusCodeFromError(err)
+	if status == http.StatusRequestEntityTooLarge {
+		// A bare 413 without a structured fault body and without context-window
+		// wording is not a definitive request fault: some upstreams return 413 for
+		// generic infrastructure size limits that may differ per credential. Only
+		// fast-fail when the body carries a known request-fault code/type or
+		// explicit context-window wording.
+		if clienterror.HasRequestFaultBody(err) || isContextWindowExceededError(err) {
+			return true
+		}
+		return false
+	}
 	if clienterror.IsRequestFault(status, err) {
 		return true
 	}

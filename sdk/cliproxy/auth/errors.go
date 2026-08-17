@@ -19,6 +19,9 @@ const connectionLifecycleErrorCode = ErrorCodeConnectionLifecycle
 
 const upstreamTimeoutErrorCode = "upstream_timeout"
 
+// ErrorCodeForceCooldown marks failures that must enforce credential cooldown.
+const ErrorCodeForceCooldown = "force_cooldown"
+
 const (
 	markerProviderEnded   = "Provider ended the request"
 	markerUpstreamTimeout = "上游响应超时"

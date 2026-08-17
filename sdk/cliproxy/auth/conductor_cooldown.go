@@ -745,6 +745,9 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			if modelKey != "" {
 				if !shouldSkipCredentialCooldown(result.Error) {
 					disableCooling := m.cooldownDisabledForAuth(auth)
+					if result.Error != nil && result.Error.Code == ErrorCodeForceCooldown {
+						disableCooling = false
+					}
 					state := ensureModelState(auth, modelKey)
 					state.Unavailable = true
 					state.Status = StatusError
@@ -878,12 +881,19 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 						state.Unavailable = false
 						state.Quota.Exceeded = false
 					}
+					if result.Error != nil && result.Error.Code == ErrorCodeForceCooldown && state.NextRetryAfter.IsZero() {
+						state.NextRetryAfter = now.Add(transientErrorCooldown)
+						state.Unavailable = true
+					}
 					auth.Status = StatusError
 					auth.UpdatedAt = now
 					updateAggregatedAvailability(auth, now)
 				}
 			} else {
 				disableCooling := m.cooldownDisabledForAuth(auth)
+				if result.Error != nil && result.Error.Code == ErrorCodeForceCooldown {
+					disableCooling = false
+				}
 				applyAuthFailureState(auth, result.Error, result.RetryAfter, now, disableCooling)
 			}
 		}
@@ -1313,6 +1323,9 @@ func resultErrorFromError(err error) *Error {
 // credentials. Semantic upstream timeouts, request-scoped errors, and lifecycle
 // drops do not penalize credentials so they can be retried immediately.
 func shouldSkipCredentialCooldown(err *Error) bool {
+	if err != nil && err.Code == ErrorCodeForceCooldown {
+		return false
+	}
 	return isRequestScopedResultError(err) || isConnectionLifecycleResultError(err) || isUpstreamTimeoutResultError(err)
 }
 
@@ -1914,6 +1927,10 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 		}
 		auth.NextRetryAfter = recoverableFailureRetryAfter(now, disableCooling)
 		auth.Unavailable = !auth.NextRetryAfter.IsZero()
+	}
+	if resultErr != nil && resultErr.Code == ErrorCodeForceCooldown && auth.NextRetryAfter.IsZero() {
+		auth.NextRetryAfter = now.Add(transientErrorCooldown)
+		auth.Unavailable = true
 	}
 }
 

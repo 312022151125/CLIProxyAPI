@@ -42,7 +42,8 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 		return cliproxyexecutor.Response{}, &Error{Code: "provider_not_found", Message: "no provider supplied"}
 	}
 	if m.HomeEnabled() {
-		return m.executeHome(ctx, normalized, req, opts, false)
+		resp, errHome := m.executeHome(ctx, normalized, req, opts, false)
+		return resp, unwrapRequestStopError(errHome)
 	}
 
 	_, maxRetryCredentials, maxWait := m.retrySettings()
@@ -54,69 +55,8 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 		if errExec == nil {
 			return resp, nil
 		}
-		if isRequestTerminatedError(errExec) {
-			return cliproxyexecutor.Response{}, errExec
-		}
-		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errExec); ok {
-			return cliproxyexecutor.Response{}, exhaustedErr
-		}
-		lastErr = errExec
-		if isUpstreamTimeoutError(errExec) {
-			maxRetries := m.effectiveRequestRetry(normalized)
-			if attempt < maxRetries {
-				delay := semanticRetryDelay(attempt)
-				if errWait := semanticRetryWaitFunc(ctx, delay); errWait != nil {
-					return cliproxyexecutor.Response{}, errWait
-				}
-				continue
-			}
-			break
-		}
-		wait, shouldRetry := m.shouldRetryAfterError(errExec, attempt, normalized, retryModel, maxWait)
-		if !shouldRetry {
-			break
-		}
-		if errWait := waitForCooldown(ctx, wait, maxWait); errWait != nil {
-			return cliproxyexecutor.Response{}, errWait
-		}
-	}
-	if hasCodexProvider(normalized) {
-		if fbResp, ok := m.tryCodexModelFallbackExecute(ctx, normalized, req, opts, lastErr); ok {
-			return fbResp, nil
-		}
-	}
-	if hasAntigravityProvider(normalized) && shouldAttemptAntigravityCreditsFallback(m, lastErr, normalized) {
-		if fbResp, ok, errCredits := m.tryAntigravityCreditsExecute(ctx, req, opts); errCredits != nil {
-			return cliproxyexecutor.Response{}, errCredits
-		} else if ok {
-			return fbResp, nil
-		}
-	}
-	return cliproxyexecutor.Response{}, lastErr
-}
-
-// It supports multiple providers for the same model and round-robins the starting provider per model.
-func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
-	req, opts = cliproxysession.Enrich(req, opts)
-	normalized := m.normalizeProviders(providers)
-	if len(normalized) == 0 {
-		return cliproxyexecutor.Response{}, &Error{Code: "provider_not_found", Message: "no provider supplied"}
-	}
-	if m.HomeEnabled() {
-		return m.executeHome(ctx, normalized, req, opts, true)
-	}
-
-	_, maxRetryCredentials, maxWait := m.retrySettings()
-
-	var lastErr error
-	retryModel := authSelectionModelFromOptions(opts, req.Model)
-	for attempt := 0; ; attempt++ {
-		resp, errExec := m.executeCountMixedOnce(ctx, normalized, req, opts, maxRetryCredentials)
-		if errExec == nil {
-			return resp, nil
-		}
-		if isRequestTerminatedError(errExec) {
-			return cliproxyexecutor.Response{}, errExec
+		if isRequestTerminatedError(errExec) || isRequestStopError(errExec) {
+			return cliproxyexecutor.Response{}, unwrapRequestStopError(errExec)
 		}
 		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errExec); ok {
 			return cliproxyexecutor.Response{}, exhaustedErr
@@ -142,7 +82,73 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 		}
 	}
 	if lastErr != nil {
+		lastErr = unwrapRequestStopError(lastErr)
+		if hasCodexProvider(normalized) {
+			if fbResp, ok := m.tryCodexModelFallbackExecute(ctx, normalized, req, opts, lastErr); ok {
+				return fbResp, nil
+			}
+		}
+		if hasAntigravityProvider(normalized) && shouldAttemptAntigravityCreditsFallback(m, lastErr, normalized) {
+			if resp, ok, errCredits := m.tryAntigravityCreditsExecute(ctx, req, opts); errCredits != nil {
+				return cliproxyexecutor.Response{}, errCredits
+			} else if ok {
+				return resp, nil
+			}
+		}
 		return cliproxyexecutor.Response{}, lastErr
+	}
+	return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
+}
+
+// It supports multiple providers for the same model and round-robins the starting provider per model.
+func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	req, opts = cliproxysession.Enrich(req, opts)
+	normalized := m.normalizeProviders(providers)
+	if len(normalized) == 0 {
+		return cliproxyexecutor.Response{}, &Error{Code: "provider_not_found", Message: "no provider supplied"}
+	}
+	if m.HomeEnabled() {
+		resp, errHome := m.executeHome(ctx, normalized, req, opts, true)
+		return resp, unwrapRequestStopError(errHome)
+	}
+
+	_, maxRetryCredentials, maxWait := m.retrySettings()
+
+	var lastErr error
+	retryModel := authSelectionModelFromOptions(opts, req.Model)
+	for attempt := 0; ; attempt++ {
+		resp, errExec := m.executeCountMixedOnce(ctx, normalized, req, opts, maxRetryCredentials)
+		if errExec == nil {
+			return resp, nil
+		}
+		if isRequestTerminatedError(errExec) || isRequestStopError(errExec) {
+			return cliproxyexecutor.Response{}, unwrapRequestStopError(errExec)
+		}
+		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errExec); ok {
+			return cliproxyexecutor.Response{}, exhaustedErr
+		}
+		lastErr = errExec
+		if isUpstreamTimeoutError(errExec) {
+			maxRetries := m.effectiveRequestRetry(normalized)
+			if attempt < maxRetries {
+				delay := semanticRetryDelay(attempt)
+				if errWait := semanticRetryWaitFunc(ctx, delay); errWait != nil {
+					return cliproxyexecutor.Response{}, errWait
+				}
+				continue
+			}
+			break
+		}
+		wait, shouldRetry := m.shouldRetryAfterError(errExec, attempt, normalized, retryModel, maxWait)
+		if !shouldRetry {
+			break
+		}
+		if errWait := waitForCooldown(ctx, wait, maxWait); errWait != nil {
+			return cliproxyexecutor.Response{}, errWait
+		}
+	}
+	if lastErr != nil {
+		return cliproxyexecutor.Response{}, unwrapRequestStopError(lastErr)
 	}
 	return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 }
@@ -170,8 +176,8 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 		if errStream == nil {
 			return result, nil
 		}
-		if isRequestTerminatedError(errStream) {
-			return nil, errStream
+		if isRequestTerminatedError(errStream) || isRequestStopError(errStream) {
+			return nil, unwrapRequestStopError(errStream)
 		}
 		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errStream); ok {
 			return nil, exhaustedErr
@@ -196,16 +202,19 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 			return nil, errWait
 		}
 	}
-	if hasCodexProvider(normalized) {
-		if fbResult, ok := m.tryCodexModelFallbackExecuteStream(ctx, normalized, req, opts, lastErr); ok {
-			return fbResult, nil
+	if lastErr != nil {
+		lastErr = unwrapRequestStopError(lastErr)
+		if hasCodexProvider(normalized) {
+			if fbResult, ok := m.tryCodexModelFallbackExecuteStream(ctx, normalized, req, opts, lastErr); ok {
+				return fbResult, nil
+			}
 		}
-	}
-	if hasAntigravityProvider(normalized) && shouldAttemptAntigravityCreditsFallback(m, lastErr, normalized) {
-		if fbResult, ok, errCredits := m.tryAntigravityCreditsExecuteStream(ctx, req, opts); errCredits != nil {
-			return nil, errCredits
-		} else if ok {
-			return fbResult, nil
+		if hasAntigravityProvider(normalized) && shouldAttemptAntigravityCreditsFallback(m, lastErr, normalized) {
+			if result, ok, errCredits := m.tryAntigravityCreditsExecuteStream(ctx, req, opts); errCredits != nil {
+				return nil, errCredits
+			} else if ok {
+				return result, nil
+			}
 		}
 	}
 	var bootstrapErr *streamBootstrapError
@@ -441,9 +450,21 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 				if isCredentialScopedError(errExec) {
 					result.CredentialScope = true
 				}
+				action, okAction := matchRequestScopedErrorAction(auth, errExec, m.runtimeConfigSnapshot())
+				applyRequestScopedActionToResult(action, okAction, &result)
 				m.MarkResult(execCtx, result)
 				if rotateOn429 && isOpenAICompatAPIKeyAuth(auth) && statusCodeFromError(errExec) == http.StatusTooManyRequests {
 					exhaustOpenAICompatKeys = true
+				}
+				if okAction {
+					if isRequestScopedStop(action, okAction) {
+						return cliproxyexecutor.Response{}, wrapRequestStopError(errExec)
+					}
+					authErr = errExec
+					if result.CredentialScope {
+						break
+					}
+					continue
 				}
 				if isRequestInvalidError(errExec) {
 					return cliproxyexecutor.Response{}, errExec
@@ -460,6 +481,17 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 			return resp, nil
 		}
 		if authErr != nil {
+			action, okAction := matchRequestScopedErrorAction(auth, authErr, m.runtimeConfigSnapshot())
+			if okAction {
+				if isRequestScopedStop(action, okAction) {
+					return cliproxyexecutor.Response{}, wrapRequestStopError(authErr)
+				}
+				lastErr = authErr
+				if homeMode {
+					homeAuthCount++
+				}
+				continue
+			}
 			if isRequestInvalidError(authErr) {
 				return cliproxyexecutor.Response{}, authErr
 			}
@@ -577,17 +609,29 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 				if ra := retryAfterFromError(errExec); ra != nil {
 					result.RetryAfter = ra
 				}
+				action, okAction := matchRequestScopedErrorAction(auth, errExec, m.runtimeConfigSnapshot())
+				applyRequestScopedActionToResult(action, okAction, &result)
 				// Some Anthropic-compatible upstreams do not implement the
 				// count_tokens route and return a generic endpoint 404. Record
 				// the failure for hooks and metrics without suspending a model
 				// that remains usable through the messages endpoint.
-				if isCountTokensEndpointNotFoundError(errExec, execReq.Model) {
+				if isCountTokensEndpointNotFoundError(errExec, execReq.Model) && (result.Error == nil || result.Error.Code != ErrorCodeForceCooldown) {
 					m.recordAvailabilityNeutralResult(execCtx, result)
 				} else {
 					if isCredentialScopedError(errExec) {
 						result.CredentialScope = true
 					}
 					m.MarkResult(execCtx, result)
+				}
+				if okAction {
+					if isRequestScopedStop(action, okAction) {
+						return cliproxyexecutor.Response{}, wrapRequestStopError(errExec)
+					}
+					authErr = errExec
+					if result.CredentialScope {
+						break
+					}
+					continue
 				}
 				if isRequestInvalidError(errExec) {
 					return cliproxyexecutor.Response{}, errExec
@@ -604,6 +648,17 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 			return resp, nil
 		}
 		if authErr != nil {
+			action, okAction := matchRequestScopedErrorAction(auth, authErr, m.runtimeConfigSnapshot())
+			if okAction {
+				if isRequestScopedStop(action, okAction) {
+					return cliproxyexecutor.Response{}, wrapRequestStopError(authErr)
+				}
+				lastErr = authErr
+				if homeMode {
+					homeAuthCount++
+				}
+				continue
+			}
 			if isRequestInvalidError(authErr) {
 				return cliproxyexecutor.Response{}, authErr
 			}
@@ -785,6 +840,17 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 			}
 			if errCtx := execCtx.Err(); errCtx != nil && ctx != nil && ctx.Err() != nil {
 				return nil, errCtx
+			}
+			action, okAction := matchRequestScopedErrorAction(auth, errStream, m.runtimeConfigSnapshot())
+			if okAction {
+				if isRequestScopedStop(action, okAction) {
+					return nil, wrapRequestStopError(errStream)
+				}
+				lastErr = errStream
+				if homeMode {
+					homeAuthCount++
+				}
+				continue
 			}
 			if isRequestInvalidError(errStream) {
 				return nil, errStream

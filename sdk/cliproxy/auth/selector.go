@@ -758,10 +758,11 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 		return s.fallback.Pick(ctx, provider, model, opts, auths)
 	}
 
-	cacheKey := provider + "::" + primaryID + "::" + model
+	modelKey := canonicalModelKey(model)
+	cacheKey := provider + "::" + primaryID + "::" + modelKey
 	fallbackKey := ""
 	if fallbackID != "" && fallbackID != primaryID {
-		fallbackKey = provider + "::" + fallbackID + "::" + model
+		fallbackKey = provider + "::" + fallbackID + "::" + modelKey
 	}
 	bind := func(authID string) {
 		if fallbackKey != "" {
@@ -869,9 +870,9 @@ func (s *SessionAffinitySelector) OnResult(res Result) {
 	if raw, ok := res.Options.Metadata[cliproxyexecutor.SessionAffinityProviderMetadataKey].(string); ok && raw != "" {
 		ns = raw
 	}
-	nsModel := res.Model
+	nsModel := canonicalModelKey(res.Model)
 	if raw, ok := res.Options.Metadata[cliproxyexecutor.SessionAffinityModelMetadataKey].(string); ok && raw != "" {
-		nsModel = raw
+		nsModel = canonicalModelKey(raw)
 	}
 
 	cacheKey := ns + "::" + primaryID + "::" + nsModel

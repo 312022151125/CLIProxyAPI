@@ -229,6 +229,11 @@ attemptLoop:
 			}
 
 			// Success
+			if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, bodyBytes); bodyErr != nil {
+				helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
+				err = bodyErr
+				return resp, err
+			}
 			if useCredits {
 				clearAntigravityCreditsFailureState(auth)
 			}
@@ -470,7 +475,19 @@ attemptLoop:
 				return resp, err
 			}
 
-			// Stream success
+			// Stream success: peek for HTML pages returned as 2xx by CDN/gateways.
+			// A 200-OK HTML body would silently produce an empty non-stream response.
+			if peeked, peekErr := io.ReadAll(httpResp.Body); peekErr == nil {
+				if errClose := httpResp.Body.Close(); errClose != nil {
+					log.Errorf("antigravity executor: close response body error: %v", errClose)
+				}
+				if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, peeked); bodyErr != nil {
+					helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
+					err = bodyErr
+					return resp, err
+				}
+				httpResp.Body = io.NopCloser(bytes.NewReader(peeked))
+			}
 			if useCredits {
 				clearAntigravityCreditsFailureState(auth)
 			}

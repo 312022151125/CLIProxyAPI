@@ -38,10 +38,11 @@ func (e UpstreamBodyError) RetryAfterDuration() *time.Duration { return e.RetryA
 
 // DetectUpstreamErrorBody inspects an upstream JSON response body that was
 // received with an HTTP 2xx status and returns an UpstreamBodyError when the
-// payload carries a top-level "error" object. The HTTP status passed in is the
-// one actually received from upstream (typically 200); the returned error's
-// StatusCode is derived from the error type/code so the retry classifier can
-// treat quota/billing failures as retryable across credentials.
+// payload carries a top-level "error" object or is an HTML document. The HTTP
+// status passed in is the one actually received from upstream (typically 200);
+// the returned error's StatusCode is derived from the error type/code so the
+// retry classifier can treat quota/billing failures as retryable across
+// credentials.
 //
 // Returns nil when the body is not valid JSON or does not contain an error
 // object, in which case the caller should treat the response as successful.
@@ -54,6 +55,23 @@ func DetectUpstreamErrorBody(httpStatus int, body []byte) *UpstreamBodyError {
 		if b != ' ' && b != '\t' && b != '\n' && b != '\r' {
 			firstByte = b
 			break
+		}
+	}
+	// HTML response on a 2xx status means the upstream returned a web page
+	// (e.g. a login wall, gateway error page, or CDN block page) instead of
+	// a valid API response. Surface this as a 502 Bad Gateway so the auth
+	// conductor can rotate credentials and retry rather than forwarding the
+	// HTML to the client as a successful API response.
+	if firstByte == '<' {
+		lower := strings.ToLower(strings.TrimSpace(string(body[:min(len(body), 512)])))
+		if strings.HasPrefix(lower, "<!doctype html") || strings.HasPrefix(lower, "<html") {
+			if httpStatus >= 200 && httpStatus < 300 {
+				msg := "[upstream returned HTML page instead of API response]"
+				if title := extractHTMLTitle(body); title != "" {
+					msg = "[upstream returned HTML page: " + title + "]"
+				}
+				return &UpstreamBodyError{Code: http.StatusBadGateway, Message: msg}
+			}
 		}
 	}
 	if firstByte != '{' && firstByte != '[' {

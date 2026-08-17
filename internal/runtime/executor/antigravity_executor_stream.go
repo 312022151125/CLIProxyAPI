@@ -236,7 +236,20 @@ attemptLoop:
 				return nil, err
 			}
 
-			// Stream success
+			// Stream success: peek body for HTML pages returned as 2xx.
+			{
+				peek := bufio.NewReaderSize(httpResp.Body, 512)
+				peekedBytes, _ := peek.Peek(512)
+				if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, peekedBytes); bodyErr != nil {
+					if errClose := httpResp.Body.Close(); errClose != nil {
+						log.Errorf("antigravity executor: close response body error: %v", errClose)
+					}
+					helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
+					err = bodyErr
+					return nil, err
+				}
+				httpResp.Body = io.NopCloser(peek)
+			}
 			if useCredits {
 				clearAntigravityCreditsFailureState(auth)
 			}

@@ -263,6 +263,19 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		}
 		return nil, wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, err)
 	}
+	// Peek body to detect HTML pages returned as 2xx by CDN/gateways.
+	{
+		peek := bufio.NewReaderSize(decodedBody, 512)
+		peekedBytes, _ := peek.Peek(512)
+		if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, peekedBytes); bodyErr != nil {
+			if errClose := decodedBody.Close(); errClose != nil {
+				log.Errorf("response body close error: %v", errClose)
+			}
+			helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
+			return nil, wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, bodyErr)
+		}
+		decodedBody = io.NopCloser(peek)
+	}
 	out := make(chan cliproxyexecutor.StreamChunk, 1)
 	go func() {
 		defer close(out)

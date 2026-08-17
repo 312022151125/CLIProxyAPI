@@ -158,6 +158,20 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 	}
 
 codexStartStream:
+	// Peek body to detect HTML pages returned as 2xx by CDN/gateways.
+	{
+		peek := bufio.NewReaderSize(httpResp.Body, 512)
+		peekedBytes, _ := peek.Peek(512)
+		if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, peekedBytes); bodyErr != nil {
+			if errClose := httpResp.Body.Close(); errClose != nil {
+				log.Errorf("codex executor: close response body error: %v", errClose)
+			}
+			helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
+			err = bodyErr
+			return nil, err
+		}
+		httpResp.Body = io.NopCloser(peek)
+	}
 	out := make(chan cliproxyexecutor.StreamChunk)
 	go func() {
 		defer close(out)

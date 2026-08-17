@@ -66,6 +66,19 @@ func (e *XAIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth
 		return nil, xaiStatusErr(httpResp.StatusCode, data)
 	}
 
+	// Peek body to detect HTML pages returned as 2xx by CDN/gateways.
+	{
+		peek := bufio.NewReaderSize(httpResp.Body, 512)
+		peekedBytes, _ := peek.Peek(512)
+		if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, peekedBytes); bodyErr != nil {
+			if errClose := httpResp.Body.Close(); errClose != nil {
+				log.Errorf("xai executor: close response body error: %v", errClose)
+			}
+			helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
+			return nil, bodyErr
+		}
+		httpResp.Body = io.NopCloser(peek)
+	}
 	out := make(chan cliproxyexecutor.StreamChunk)
 	go func() {
 		defer close(out)

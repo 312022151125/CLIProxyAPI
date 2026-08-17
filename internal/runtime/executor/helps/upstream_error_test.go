@@ -94,3 +94,81 @@ func TestDetectUpstreamErrorBody_PreservesNon2xxStatus(t *testing.T) {
 		t.Fatalf("expected preserved status 500, got %d", err.Code)
 	}
 }
+
+func TestDetectUpstreamErrorBody_HTMLDoctype(t *testing.T) {
+	body := []byte("<!doctype html><html lang=\"zh-CN\"><head><title>Mze - API - AI API Gateway</title></head></html>")
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err == nil {
+		t.Fatal("expected error for HTML body on HTTP 200")
+	}
+	if err.Code != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d", err.Code)
+	}
+	if err.Message == "" {
+		t.Fatal("expected non-empty error message")
+	}
+}
+
+func TestDetectUpstreamErrorBody_HTMLDoctypeUpperCase(t *testing.T) {
+	body := []byte("<!DOCTYPE HTML><html><head><title>Gateway Error</title></head><body></body></html>")
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err == nil {
+		t.Fatal("expected error for uppercase DOCTYPE HTML body")
+	}
+	if err.Code != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d", err.Code)
+	}
+}
+
+func TestDetectUpstreamErrorBody_HTMLTagOnly(t *testing.T) {
+	body := []byte("<html lang=\"en\"><head><title>Login</title></head></html>")
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err == nil {
+		t.Fatal("expected error for <html> body")
+	}
+	if err.Code != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d", err.Code)
+	}
+}
+
+func TestDetectUpstreamErrorBody_HTMLWithTitle(t *testing.T) {
+	body := []byte("<!doctype html><html><head><title>Mze - API - AI API Gateway</title></head></html>")
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err == nil {
+		t.Fatal("expected error for HTML body with title")
+	}
+	if err.Message != "[upstream returned HTML page: Mze - API - AI API Gateway]" {
+		t.Fatalf("unexpected message: %s", err.Message)
+	}
+}
+
+func TestDetectUpstreamErrorBody_HTMLNoTitle(t *testing.T) {
+	body := []byte("<!doctype html><html><head></head><body><p>Forbidden</p></body></html>")
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err == nil {
+		t.Fatal("expected error for HTML body without title")
+	}
+	if err.Message != "[upstream returned HTML page instead of API response]" {
+		t.Fatalf("unexpected message: %s", err.Message)
+	}
+}
+
+func TestDetectUpstreamErrorBody_HTMLNon2xx(t *testing.T) {
+	// Non-2xx HTML should not be caught here (already handled by status check in executor)
+	body := []byte("<!doctype html><html><head><title>Not Found</title></head></html>")
+	err := DetectUpstreamErrorBody(http.StatusNotFound, body)
+	if err != nil {
+		t.Fatalf("expected nil for non-2xx HTML body, got %v", err)
+	}
+}
+
+func TestDetectUpstreamErrorBody_HTMLWhitespacePrefix(t *testing.T) {
+	body := []byte("\n\n  <!doctype html><html><head><title>Page</title></head></html>")
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err == nil {
+		t.Fatal("expected error for HTML body with leading whitespace")
+	}
+	if err.Code != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d", err.Code)
+	}
+}

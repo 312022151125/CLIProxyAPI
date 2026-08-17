@@ -151,6 +151,10 @@ codexReadExecuteResponse:
 	data, errRead := io.ReadAll(httpResp.Body)
 	upstreamData := applyCodexIdentityConfuseResponsePayload(data, identityState)
 	helps.AppendAPIResponseChunk(ctx, e.cfg, upstreamData)
+	if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, upstreamData); bodyErr != nil {
+		helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
+		return resp, bodyErr
+	}
 
 	lines := bytes.Split(upstreamData, []byte("\n"))
 	outputItemsByIndex := make(map[int64][]byte)
@@ -333,6 +337,10 @@ codexReadCompactResponse:
 	}
 	upstreamData := applyCodexIdentityConfuseResponsePayload(data, identityState)
 	helps.AppendAPIResponseChunk(ctx, e.cfg, upstreamData)
+	if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, upstreamData); bodyErr != nil {
+		helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
+		return resp, bodyErr
+	}
 	upstreamData = helps.RestoreCodexMultiAgentV2Response(upstreamData, optimizeMultiAgentV2)
 	reporter.Publish(ctx, helps.ParseOpenAIUsage(upstreamData))
 	reporter.EnsurePublished(ctx)

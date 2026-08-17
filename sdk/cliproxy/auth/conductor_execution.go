@@ -95,6 +95,11 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 				return resp, nil
 			}
 		}
+		if m.shouldAttemptAllProvidersFallback() {
+			if resp, ok := m.tryAllProvidersFallbackExecute(ctx, normalized, req, opts); ok {
+				return resp, nil
+			}
+		}
 		return cliproxyexecutor.Response{}, lastErr
 	}
 	return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
@@ -148,7 +153,13 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 		}
 	}
 	if lastErr != nil {
-		return cliproxyexecutor.Response{}, unwrapRequestStopError(lastErr)
+		lastErr = unwrapRequestStopError(lastErr)
+		if m.shouldAttemptAllProvidersFallback() {
+			if resp, ok := m.tryAllProvidersFallbackExecute(ctx, normalized, req, opts); ok {
+				return resp, nil
+			}
+		}
+		return cliproxyexecutor.Response{}, lastErr
 	}
 	return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 }
@@ -213,6 +224,11 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 			if result, ok, errCredits := m.tryAntigravityCreditsExecuteStream(ctx, req, opts); errCredits != nil {
 				return nil, errCredits
 			} else if ok {
+				return result, nil
+			}
+		}
+		if m.shouldAttemptAllProvidersFallback() {
+			if result, ok := m.tryAllProvidersFallbackExecuteStream(ctx, normalized, req, opts); ok {
 				return result, nil
 			}
 		}

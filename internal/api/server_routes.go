@@ -77,6 +77,7 @@ func (s *Server) setupRoutes() {
 		v1.POST("/videos/characters", openaiHandlers.XAIVideosCreateCharacter)
 		v1.GET("/videos/characters/:character_id", openaiHandlers.XAIVideosGetCharacter)
 		v1.GET("/videos/:request_id", openaiHandlers.XAIVideosRetrieve)
+		v1.GET("/videos/:request_id/content", openaiHandlers.XAIVideosContent)
 		v1.DELETE("/videos/:request_id", openaiHandlers.XAIVideosDelete)
 		v1.POST("/videos/:request_id/remix", openaiHandlers.XAIVideosRemix)
 		v1.POST("/messages", claudeCodeHandlers.ClaudeMessages)

@@ -59,6 +59,7 @@ type xaiVideoCreateMetadata struct {
 type videoAuthBinding struct {
 	authID    string
 	model     string
+	baseURL   string
 	expiresAt time.Time
 }
 
@@ -78,6 +79,10 @@ func (s *videoAuthBindingStore) set(videoID string, authID string, ttl time.Dura
 }
 
 func (s *videoAuthBindingStore) setWithModel(videoID string, authID string, model string, ttl time.Duration) {
+	s.setFull(videoID, authID, model, "", ttl)
+}
+
+func (s *videoAuthBindingStore) setFull(videoID string, authID string, model string, baseURL string, ttl time.Duration) {
 	if s == nil {
 		return
 	}
@@ -95,6 +100,7 @@ func (s *videoAuthBindingStore) setWithModel(videoID string, authID string, mode
 	s.entries[videoID] = videoAuthBinding{
 		authID:    authID,
 		model:     strings.TrimSpace(model),
+		baseURL:   strings.TrimSpace(baseURL),
 		expiresAt: now.Add(ttl),
 	}
 	s.mu.Unlock()
@@ -332,11 +338,34 @@ func (h *OpenAIAPIHandler) bindVideoAuthIDAndModelFromPayload(payload []byte, au
 	if videoID == "" {
 		return
 	}
-	videoAuthBindings.setWithModel(videoID, authID, routingXAIVideosModel(model), h.videoAuthBindingTTL())
+	videoAuthBindings.setFull(videoID, authID, routingXAIVideosModel(model), h.authBaseURL(authID), h.videoAuthBindingTTL())
 }
 
 func (h *OpenAIAPIHandler) bindVideoAuthID(videoID string, authID string, model string) {
-	videoAuthBindings.setWithModel(videoID, authID, routingXAIVideosModel(model), h.videoAuthBindingTTL())
+	videoAuthBindings.setFull(videoID, authID, routingXAIVideosModel(model), h.authBaseURL(authID), h.videoAuthBindingTTL())
+}
+
+// authBaseURL returns the provider baseURL for the given authID, or empty string if not found.
+// Used to store the baseURL in videoAuthBinding so relative content URLs can be resolved later.
+func (h *OpenAIAPIHandler) authBaseURL(authID string) string {
+	if h == nil || h.BaseAPIHandler == nil || h.AuthManager == nil || authID == "" {
+		return ""
+	}
+	auth, ok := h.AuthManager.GetByID(strings.TrimSpace(authID))
+	if !ok || auth == nil || auth.Attributes == nil {
+		return ""
+	}
+	return strings.TrimSpace(auth.Attributes["base_url"])
+}
+
+// baseURLForVideoAuth returns the stored provider baseURL for the given videoID binding.
+// Returns empty string if no binding exists or no baseURL was stored.
+func (h *OpenAIAPIHandler) baseURLForVideoAuth(videoID string) string {
+	binding, ok := videoAuthBindings.getBinding(videoID)
+	if !ok {
+		return ""
+	}
+	return binding.baseURL
 }
 
 func (h *OpenAIAPIHandler) contextWithVideoAuthBinding(ctx context.Context, videoID string) context.Context {
@@ -683,16 +712,29 @@ func markOpenAIVideoFailed(out []byte) []byte {
 	return out
 }
 
-func xaiVideoContentURLFromPayload(payload []byte) (string, error) {
+func xaiVideoContentURLFromPayload(payload []byte, providerBaseURL string) (string, error) {
 	rawURL := strings.TrimSpace(gjson.GetBytes(payload, "video.url").String())
 	if rawURL == "" {
 		return "", fmt.Errorf("xAI video response did not include video.url")
 	}
 	parsed, err := url.Parse(rawURL)
-	if err != nil || parsed == nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+	if err != nil || parsed == nil {
 		return "", fmt.Errorf("xAI video response included invalid video.url")
 	}
-	return rawURL, nil
+	// Already an absolute URL — use as-is.
+	if parsed.Scheme == "http" || parsed.Scheme == "https" {
+		if parsed.Host == "" {
+			return "", fmt.Errorf("xAI video response included invalid video.url")
+		}
+		return rawURL, nil
+	}
+	// Relative URL — resolve against the provider's base URL if available.
+	providerBaseURL = strings.TrimSpace(providerBaseURL)
+	if providerBaseURL == "" {
+		return "", fmt.Errorf("xAI video response included a relative video.url but no provider base URL is available")
+	}
+	resolved := strings.TrimRight(providerBaseURL, "/") + "/" + strings.TrimLeft(rawURL, "/")
+	return resolved, nil
 }
 
 func openAIVideoStatus(status string) string {
@@ -854,7 +896,25 @@ func (h *OpenAIAPIHandler) VideosContent(c *gin.Context) {
 		})
 		return
 	}
+	h.videosContentByID(c, videoID)
+}
 
+// XAIVideosContent handles GET /v1/videos/:request_id/content — downloads the actual video bytes.
+func (h *OpenAIAPIHandler) XAIVideosContent(c *gin.Context) {
+	requestID := strings.TrimSpace(c.Param("request_id"))
+	if requestID == "" {
+		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+			Error: handlers.ErrorDetail{
+				Message: "Invalid request: request_id is required",
+				Type:    "invalid_request_error",
+			},
+		})
+		return
+	}
+	h.videosContentByID(c, requestID)
+}
+
+func (h *OpenAIAPIHandler) videosContentByID(c *gin.Context, videoID string) {
 	variant := strings.TrimSpace(c.Query("variant"))
 	if variant == "" {
 		variant = "video"
@@ -893,7 +953,7 @@ func (h *OpenAIAPIHandler) VideosContent(c *gin.Context) {
 	}
 
 	h.bindVideoAuthID(videoID, selectedAuthID, executionModel)
-	contentURL, err := xaiVideoContentURLFromPayload(resp)
+	contentURL, err := xaiVideoContentURLFromPayload(resp, h.baseURLForVideoAuth(videoID))
 	if err != nil {
 		errMsg := &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: err}
 		h.WriteErrorResponse(c, errMsg)
@@ -901,14 +961,14 @@ func (h *OpenAIAPIHandler) VideosContent(c *gin.Context) {
 		return
 	}
 
-	if errDownload := h.writeVideoContentFromURL(c, contentURL); errDownload != nil {
+	if errDownload := h.writeVideoContentFromURL(c, videoID, contentURL); errDownload != nil {
 		cliCancel(errDownload)
 		return
 	}
 	cliCancel(nil)
 }
 
-func (h *OpenAIAPIHandler) writeVideoContentFromURL(c *gin.Context, contentURL string) error {
+func (h *OpenAIAPIHandler) writeVideoContentFromURL(c *gin.Context, videoID string, contentURL string) error {
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, contentURL, nil)
 	if err != nil {
 		errMsg := &interfaces.ErrorMessage{
@@ -919,7 +979,7 @@ func (h *OpenAIAPIHandler) writeVideoContentFromURL(c *gin.Context, contentURL s
 		return err
 	}
 
-	httpClient := h.videoContentHTTPClient(c)
+	httpClient := h.videoContentHTTPClient(c, videoID)
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		errMsg := &interfaces.ErrorMessage{
@@ -955,7 +1015,7 @@ func (h *OpenAIAPIHandler) writeVideoContentFromURL(c *gin.Context, contentURL s
 	return err
 }
 
-func (h *OpenAIAPIHandler) videoContentHTTPClient(c *gin.Context) *http.Client {
+func (h *OpenAIAPIHandler) videoContentHTTPClient(c *gin.Context, videoID string) *http.Client {
 	ctx := context.Background()
 	if c != nil && c.Request != nil {
 		ctx = c.Request.Context()
@@ -964,14 +1024,14 @@ func (h *OpenAIAPIHandler) videoContentHTTPClient(c *gin.Context) *http.Client {
 	if h != nil && h.BaseAPIHandler != nil && h.Cfg != nil {
 		cfg = &config.Config{SDKConfig: *h.Cfg}
 	}
-	return helps.NewProxyAwareHTTPClient(ctx, cfg, h.videoContentDownloadAuth(c), 0)
+	return helps.NewProxyAwareHTTPClient(ctx, cfg, h.videoContentDownloadAuth(videoID), 0)
 }
 
-func (h *OpenAIAPIHandler) videoContentDownloadAuth(c *gin.Context) *coreauth.Auth {
-	if h == nil || h.BaseAPIHandler == nil || h.AuthManager == nil || c == nil {
+func (h *OpenAIAPIHandler) videoContentDownloadAuth(videoID string) *coreauth.Auth {
+	if h == nil || h.BaseAPIHandler == nil || h.AuthManager == nil {
 		return nil
 	}
-	videoID := strings.TrimSpace(c.Param("video_id"))
+	videoID = strings.TrimSpace(videoID)
 	if videoID == "" {
 		return nil
 	}

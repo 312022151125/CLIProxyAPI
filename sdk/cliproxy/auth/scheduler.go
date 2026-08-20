@@ -758,7 +758,12 @@ func (m *modelScheduler) promoteExpiredLocked(now time.Time) {
 		if entry == nil || entry.auth == nil {
 			continue
 		}
-		if entry.nextRetryAt.IsZero() || entry.nextRetryAt.After(now) {
+		// Skip entries that still have a future retry time — they are not ready yet.
+		// Entries with a zero nextRetryAt are also re-evaluated: availabilityBlock may
+		// return blockReasonOther with a zero recovery time when the auth is marked
+		// unavailable but all recorded recovery timestamps have already elapsed. These
+		// entries would otherwise be permanently stuck in the blocked queue.
+		if !entry.nextRetryAt.IsZero() && entry.nextRetryAt.After(now) {
 			continue
 		}
 		blocked, reason, next := isAuthBlockedForModel(entry.auth, m.modelKey, now)

@@ -1131,9 +1131,6 @@ func (m *Manager) SelectAuth(ctx context.Context, provider, model string, opts c
 	if errPick != nil {
 		return nil, errPick
 	}
-	if m.HomeEnabled() {
-		return nil, &Error{Code: "home_unavailable", Message: "legacy auth selection is unavailable while Home is enabled", HTTPStatus: http.StatusServiceUnavailable}
-	}
 	return selected, nil
 }
 
@@ -1155,9 +1152,6 @@ func (m *Manager) SelectAuthByKind(ctx context.Context, provider, model, require
 	}
 	if selected == nil {
 		return nil, &Error{Code: "auth_not_found", Message: "selector returned no auth"}
-	}
-	if m.HomeEnabled() {
-		return nil, &Error{Code: "home_unavailable", Message: "legacy auth selection is unavailable while Home is enabled", HTTPStatus: http.StatusServiceUnavailable}
 	}
 	return selected, nil
 }
@@ -1181,9 +1175,6 @@ func (m *Manager) SelectAuthWithCredentialPolicy(ctx context.Context, provider, 
 	}
 	if selected == nil || !credentialPolicyAllows(policy, selected) {
 		return nil, &Error{Code: "auth_not_found", Message: "selector returned no eligible auth"}
-	}
-	if m.HomeEnabled() {
-		return nil, &Error{Code: "home_unavailable", Message: "legacy auth selection is unavailable while Home is enabled", HTTPStatus: http.StatusServiceUnavailable}
 	}
 	return selected, nil
 }

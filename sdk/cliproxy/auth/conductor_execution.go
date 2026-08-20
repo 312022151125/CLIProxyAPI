@@ -468,9 +468,13 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 				}
 				action, okAction := matchRequestScopedErrorAction(auth, errExec, m.runtimeConfigSnapshot())
 				applyRequestScopedActionToResult(action, okAction, &result)
-				m.MarkResult(execCtx, result)
-				if rotateOn429 && isOpenAICompatAPIKeyAuth(auth) && statusCodeFromError(errExec) == http.StatusTooManyRequests {
-					exhaustOpenAICompatKeys = true
+				if isResponsesCompactAvailabilityNeutralError(execOpts, errExec, result.Error) {
+					m.recordAvailabilityNeutralResult(execCtx, result)
+				} else {
+					m.MarkResult(execCtx, result)
+					if rotateOn429 && isOpenAICompatAPIKeyAuth(auth) && statusCodeFromError(errExec) == http.StatusTooManyRequests {
+						exhaustOpenAICompatKeys = true
+					}
 				}
 				if okAction {
 					if isRequestScopedStop(action, okAction) {
@@ -482,7 +486,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 					}
 					continue
 				}
-				if isRequestInvalidError(errExec) {
+				if isResponsesCompactRequestFaultError(execOpts, errExec) || isRequestInvalidError(errExec) {
 					return cliproxyexecutor.Response{}, errExec
 				}
 				authErr = errExec
@@ -508,7 +512,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 				}
 				continue
 			}
-			if isRequestInvalidError(authErr) {
+			if isResponsesCompactRequestFaultError(opts, authErr) || isRequestInvalidError(authErr) {
 				return cliproxyexecutor.Response{}, authErr
 			}
 			lastErr = authErr

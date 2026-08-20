@@ -1019,3 +1019,70 @@ func TestManagerExecute_OpenAICompat429AllKeysReturnsFinalErrorWithoutWaiting(t 
 		t.Fatalf("execute calls = %v, want every key exactly once", got)
 	}
 }
+
+// TestManagerExecute_OpenAICompat429AllKeysRawJSONBodySanitized verifies that when
+// all relay channels return a raw JSON 429 body (as the aistudio executor produces),
+// the final error returned to the caller has its message sanitized to a generic text
+// and does not expose the internal provider details to the user.
+func TestManagerExecute_OpenAICompat429AllKeysRawJSONBodySanitized(t *testing.T) {
+	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, executeErrors: map[string]error{}}
+	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
+	// Simulate raw JSON bodies exactly as returned by the aistudio / relay executor.
+	relayBody429 := `{"error":{"code":429,"message":"Concurrency limit exceeded for account, please retry later","status":"RESOURCE_EXHAUSTED"}}`
+	badErr := &retryAfterStatusError{status: http.StatusTooManyRequests, message: relayBody429}
+	goodErr := &retryAfterStatusError{status: http.StatusTooManyRequests, message: relayBody429}
+	executor.executeErrors[badAuth.ID] = badErr
+	executor.executeErrors[goodAuth.ID] = goodErr
+
+	_, err := m.Execute(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: "claude-opus-4.66"}, cliproxyexecutor.Options{})
+	if err == nil {
+		t.Fatal("expected error when all keys are rate-limited")
+	}
+	// Status must remain 429.
+	if statusCodeFromError(err) != http.StatusTooManyRequests {
+		t.Fatalf("error status = %d, want 429", statusCodeFromError(err))
+	}
+	// Raw provider JSON must NOT be present in the returned error message.
+	if strings.Contains(err.Error(), "Concurrency limit exceeded") {
+		t.Fatalf("error message leaks raw provider body: %v", err)
+	}
+	if strings.Contains(err.Error(), "RESOURCE_EXHAUSTED") {
+		t.Fatalf("error message leaks raw provider body: %v", err)
+	}
+	// Both credentials must have been attempted before giving up.
+	got := executor.ExecuteCalls()
+	if len(got) != 2 {
+		t.Fatalf("execute calls = %v, want both credentials attempted", got)
+	}
+}
+
+// TestManagerExecuteStream_OpenAICompat429AllKeysRawJSONBodySanitized is the streaming
+// counterpart of TestManagerExecute_OpenAICompat429AllKeysRawJSONBodySanitized.
+func TestManagerExecuteStream_OpenAICompat429AllKeysRawJSONBodySanitized(t *testing.T) {
+	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, streamErrors: map[string]error{}}
+	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
+	relayBody429 := `{"error":{"code":429,"message":"Concurrency limit exceeded for account, please retry later","status":"RESOURCE_EXHAUSTED"}}`
+	badErr := &retryAfterStatusError{status: http.StatusTooManyRequests, message: relayBody429}
+	goodErr := &retryAfterStatusError{status: http.StatusTooManyRequests, message: relayBody429}
+	executor.streamErrors[badAuth.ID] = badErr
+	executor.streamErrors[goodAuth.ID] = goodErr
+
+	_, err := m.ExecuteStream(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: "claude-opus-4.66"}, cliproxyexecutor.Options{})
+	if err == nil {
+		t.Fatal("expected error when all keys are rate-limited")
+	}
+	if statusCodeFromError(err) != http.StatusTooManyRequests {
+		t.Fatalf("error status = %d, want 429", statusCodeFromError(err))
+	}
+	if strings.Contains(err.Error(), "Concurrency limit exceeded") {
+		t.Fatalf("stream error message leaks raw provider body: %v", err)
+	}
+	if strings.Contains(err.Error(), "RESOURCE_EXHAUSTED") {
+		t.Fatalf("stream error message leaks raw provider body: %v", err)
+	}
+	got := executor.StreamCalls()
+	if len(got) != 2 {
+		t.Fatalf("stream calls = %v, want both credentials attempted", got)
+	}
+}
+

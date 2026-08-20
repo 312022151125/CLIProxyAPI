@@ -387,6 +387,11 @@ func isStaticFileNotFoundResultError(err *Error) bool {
 // not be surfaced to the client verbatim because they expose internal provider
 // details and are not actionable by the end user (the system should have retried
 // through another relay channel before giving up).
+//
+// The function requires the error message to start with '{' (a raw JSON body) to
+// avoid false-positives on internally-constructed *Error values whose messages are
+// already clean and may legitimately contain the word "rate_limit" as part of a
+// structured code field.
 func isRelayRateLimitError(err error) bool {
 	if err == nil {
 		return false
@@ -394,7 +399,13 @@ func isRelayRateLimitError(err error) bool {
 	if statusCodeFromError(err) != http.StatusTooManyRequests {
 		return false
 	}
-	lower := strings.ToLower(err.Error())
+	msg := err.Error()
+	// Only sanitize when the message body is raw JSON from an upstream relay
+	// response. Internally-constructed errors never start with '{'.
+	if !strings.HasPrefix(strings.TrimSpace(msg), "{") {
+		return false
+	}
+	lower := strings.ToLower(msg)
 	return strings.Contains(lower, "rate_limit") ||
 		strings.Contains(lower, "rate limit") ||
 		strings.Contains(lower, "concurrency limit") ||
@@ -408,8 +419,9 @@ func isRelayRateLimitError(err error) bool {
 // sanitizeExhaustedRateLimitError replaces a relay-originated 429 rate-limit error
 // with a clean, generic error that is safe to return to end users. It is applied only
 // after all credential rotation and retry attempts have been exhausted so that the
-// raw provider error message (which contains internal details) is never forwarded to
-// the client.
+// raw provider JSON body (which contains internal provider details) is never forwarded
+// to the client. The HTTP status 429 is intentionally preserved so callers can still
+// apply Retry-After handling.
 func sanitizeExhaustedRateLimitError(err error) error {
 	if !isRelayRateLimitError(err) {
 		return err

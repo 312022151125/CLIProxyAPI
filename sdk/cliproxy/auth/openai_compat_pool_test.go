@@ -1006,8 +1006,10 @@ func TestManagerExecute_OpenAICompat429AllKeysReturnsFinalErrorWithoutWaiting(t 
 	if err == context.DeadlineExceeded || strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
 		t.Fatalf("error = %v, want final upstream error without cooldown wait", err)
 	}
-	if statusCodeFromError(err) != http.StatusTooManyRequests || err.Error() != goodErr.Error() {
-		t.Fatalf("error = %v, want final error %v", err, goodErr)
+	// The error must preserve the 429 status but the message is sanitized to avoid
+	// leaking raw provider details after all relay channels are exhausted.
+	if statusCodeFromError(err) != http.StatusTooManyRequests {
+		t.Fatalf("error = %v (status=%d), want 429 rate-limit error", err, statusCodeFromError(err))
 	}
 	if elapsed := time.Since(started); elapsed >= time.Second {
 		t.Fatalf("execute elapsed = %v, want no request-level cooldown sleep", elapsed)

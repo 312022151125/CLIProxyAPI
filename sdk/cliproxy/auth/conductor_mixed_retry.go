@@ -201,7 +201,7 @@ func (m *Manager) runMixedRetry(ctx context.Context, normalized []string, req cl
 			return resp, nil
 		}
 		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errExec); ok {
-			return cliproxyexecutor.Response{}, exhaustedErr
+			return cliproxyexecutor.Response{}, sanitizeExhaustedRateLimitError(exhaustedErr)
 		}
 		lastErr = errExec
 		if isUpstreamTimeoutError(errExec) {
@@ -224,7 +224,7 @@ func (m *Manager) runMixedRetry(ctx context.Context, normalized []string, req cl
 		}
 	}
 	if lastErr != nil {
-		return cliproxyexecutor.Response{}, lastErr
+		return cliproxyexecutor.Response{}, sanitizeExhaustedRateLimitError(lastErr)
 	}
 	return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 }
@@ -241,7 +241,7 @@ func (m *Manager) runStreamMixedRetry(ctx context.Context, normalized []string, 
 			return result, nil
 		}
 		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errStream); ok {
-			return nil, exhaustedErr
+			return nil, sanitizeExhaustedRateLimitError(exhaustedErr)
 		}
 		lastErr = errStream
 		if isUpstreamTimeoutError(errStream) {
@@ -264,7 +264,7 @@ func (m *Manager) runStreamMixedRetry(ctx context.Context, normalized []string, 
 		}
 	}
 	if lastErr != nil {
-		return nil, lastErr
+		return nil, sanitizeExhaustedRateLimitError(lastErr)
 	}
 	return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
 }
@@ -380,6 +380,46 @@ func isStaticFileNotFoundResultError(err *Error) bool {
 		return false
 	}
 	return isStaticFileNotFoundError(err)
+}
+
+// isRelayRateLimitError reports whether the error is a provider-side rate-limit or
+// concurrency-limit failure that originated from a relay channel. These errors must
+// not be surfaced to the client verbatim because they expose internal provider
+// details and are not actionable by the end user (the system should have retried
+// through another relay channel before giving up).
+func isRelayRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if statusCodeFromError(err) != http.StatusTooManyRequests {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "rate_limit") ||
+		strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "concurrency limit") ||
+		strings.Contains(lower, "concurrency_limit") ||
+		strings.Contains(lower, "too many requests") ||
+		strings.Contains(lower, "resource_exhausted") ||
+		strings.Contains(lower, "quota_exceeded") ||
+		strings.Contains(lower, "quota exceeded")
+}
+
+// sanitizeExhaustedRateLimitError replaces a relay-originated 429 rate-limit error
+// with a clean, generic error that is safe to return to end users. It is applied only
+// after all credential rotation and retry attempts have been exhausted so that the
+// raw provider error message (which contains internal details) is never forwarded to
+// the client.
+func sanitizeExhaustedRateLimitError(err error) error {
+	if !isRelayRateLimitError(err) {
+		return err
+	}
+	return &Error{
+		Code:       "rate_limit_exceeded",
+		Message:    "service is temporarily unavailable due to high demand; please retry later",
+		Retryable:  true,
+		HTTPStatus: http.StatusTooManyRequests,
+	}
 }
 
 // apiKeyPaymentExhaustedCooldown parks an API key credential effectively forever once

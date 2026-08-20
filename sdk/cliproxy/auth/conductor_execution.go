@@ -59,7 +59,7 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 			return cliproxyexecutor.Response{}, unwrapRequestStopError(errExec)
 		}
 		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errExec); ok {
-			return cliproxyexecutor.Response{}, exhaustedErr
+			return cliproxyexecutor.Response{}, sanitizeExhaustedRateLimitError(exhaustedErr)
 		}
 		lastErr = errExec
 		if isUpstreamTimeoutError(errExec) {
@@ -100,7 +100,7 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 				return resp, nil
 			}
 		}
-		return cliproxyexecutor.Response{}, lastErr
+		return cliproxyexecutor.Response{}, sanitizeExhaustedRateLimitError(lastErr)
 	}
 	return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 }
@@ -130,7 +130,7 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 			return cliproxyexecutor.Response{}, unwrapRequestStopError(errExec)
 		}
 		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errExec); ok {
-			return cliproxyexecutor.Response{}, exhaustedErr
+			return cliproxyexecutor.Response{}, sanitizeExhaustedRateLimitError(exhaustedErr)
 		}
 		lastErr = errExec
 		if isUpstreamTimeoutError(errExec) {
@@ -159,7 +159,7 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 				return resp, nil
 			}
 		}
-		return cliproxyexecutor.Response{}, lastErr
+		return cliproxyexecutor.Response{}, sanitizeExhaustedRateLimitError(lastErr)
 	}
 	return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 }
@@ -191,7 +191,7 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 			return nil, unwrapRequestStopError(errStream)
 		}
 		if exhaustedErr, ok := unwrapMixedRetryPassExhausted(errStream); ok {
-			return nil, exhaustedErr
+			return nil, sanitizeExhaustedRateLimitError(exhaustedErr)
 		}
 		lastErr = errStream
 		if isUpstreamTimeoutError(errStream) {
@@ -235,9 +235,10 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 	}
 	var bootstrapErr *streamBootstrapError
 	if errors.As(lastErr, &bootstrapErr) && bootstrapErr != nil {
-		return streamErrorResult(bootstrapErr.Headers(), bootstrapErr.cause), nil
+		sanitized := sanitizeExhaustedRateLimitError(bootstrapErr.cause)
+		return streamErrorResult(bootstrapErr.Headers(), sanitized), nil
 	}
-	return nil, lastErr
+	return nil, sanitizeExhaustedRateLimitError(lastErr)
 }
 
 type requestToFormatResolver interface {

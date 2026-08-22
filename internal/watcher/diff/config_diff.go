@@ -79,13 +79,6 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldCfg.MaxRetryCredentials != newCfg.MaxRetryCredentials {
 		changes = append(changes, fmt.Sprintf("max-retry-credentials: %d -> %d", oldCfg.MaxRetryCredentials, newCfg.MaxRetryCredentials))
 	}
-	if oldCfg.OpenAICompat429KeyRotation != newCfg.OpenAICompat429KeyRotation &&
-		(oldCfg.OpenAICompat429KeyRotation == nil || newCfg.OpenAICompat429KeyRotation == nil ||
-			*oldCfg.OpenAICompat429KeyRotation != *newCfg.OpenAICompat429KeyRotation) {
-		oldValue := oldCfg.OpenAICompat429KeyRotation == nil || *oldCfg.OpenAICompat429KeyRotation
-		newValue := newCfg.OpenAICompat429KeyRotation == nil || *newCfg.OpenAICompat429KeyRotation
-		changes = append(changes, fmt.Sprintf("openai-compat-429-key-rotation: %t -> %t", oldValue, newValue))
-	}
 	if oldCfg.MaxRetryInterval != newCfg.MaxRetryInterval {
 		changes = append(changes, fmt.Sprintf("max-retry-interval: %d -> %d", oldCfg.MaxRetryInterval, newCfg.MaxRetryInterval))
 	}

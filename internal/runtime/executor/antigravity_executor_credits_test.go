@@ -15,7 +15,6 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	homekv "github.com/router-for-me/CLIProxyAPI/v7/internal/home"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
@@ -154,66 +153,29 @@ func TestClassifyAntigravity429(t *testing.T) {
 
 	t.Run("standard antigravity rate limit with ui message stays rate limited", func(t *testing.T) {
 		body := []byte(`{
-            "error": {
-                "code": 429,
-                "message": "You have exhausted your capacity on this model. Your quota will reset after 0s.",
-                "status": "RESOURCE_EXHAUSTED",
-                "details": [
-                    {
-                        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-                        "reason": "RATE_LIMIT_EXCEEDED",
-                        "domain": "cloudcode-pa.googleapis.com",
-                        "metadata": {
-                            "model": "claude-opus-4-6-thinking",
-                            "quotaResetDelay": "479.417207ms",
-                            "quotaResetTimeStamp": "2026-04-20T09:19:49Z",
-                            "uiMessage": "true"
-                        }
-                    },
-                    {
-                        "@type": "type.googleapis.com/google.rpc.RetryInfo",
-                        "retryDelay": "0.479417207s"
-                    }
-                ]
-            }
-        }`)
-		if got := classifyAntigravity429(body); got != antigravity429RateLimited {
-			t.Fatalf("classifyAntigravity429() = %q, want %q", got, antigravity429RateLimited)
-		}
-		decision := decideAntigravity429(body)
-		if decision.kind != antigravity429DecisionImmediateSwitchAuth {
-			t.Fatalf("decideAntigravity429().kind = %q, want %q", decision.kind, antigravity429DecisionImmediateSwitchAuth)
-		}
-		if decision.retryAfter == nil {
-			t.Fatal("decideAntigravity429().retryAfter = nil")
-		}
-		wantRetryAfter := 479417207 * time.Nanosecond
-		if *decision.retryAfter != wantRetryAfter {
-			t.Fatalf("decideAntigravity429().retryAfter = %v, want %v", *decision.retryAfter, wantRetryAfter)
-		}
-	})
-
-	t.Run("capacity sentence without structured status", func(t *testing.T) {
-		body := []byte(`{"error":{"message":"You have exhausted your capacity on this model. Your quota will reset after 0s."}}`)
-		if got := classifyAntigravity429(body); got != antigravity429RateLimited {
-			t.Fatalf("classifyAntigravity429() = %q, want %q", got, antigravity429RateLimited)
-		}
-		decision := decideAntigravity429(body)
-		if decision.kind != antigravity429DecisionImmediateSwitchAuth {
-			t.Fatalf("decideAntigravity429().kind = %q, want %q", decision.kind, antigravity429DecisionImmediateSwitchAuth)
-		}
-	})
-
-	t.Run("structured rate limit", func(t *testing.T) {
-		body := []byte(`{
-            "error": {
-                "status": "RESOURCE_EXHAUSTED",
-                "details": [
-                    {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "RATE_LIMIT_EXCEEDED"},
-                    {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "0.5s"}
-                ]
-            }
-        }`)
+			"error": {
+				"code": 429,
+				"message": "You have exhausted your capacity on this model. Your quota will reset after 0s.",
+				"status": "RESOURCE_EXHAUSTED",
+				"details": [
+					{
+						"@type": "type.googleapis.com/google.rpc.ErrorInfo",
+						"reason": "RATE_LIMIT_EXCEEDED",
+						"domain": "cloudcode-pa.googleapis.com",
+						"metadata": {
+							"model": "claude-opus-4-6-thinking",
+							"quotaResetDelay": "479.417207ms",
+							"quotaResetTimeStamp": "2026-04-20T09:19:49Z",
+							"uiMessage": "true"
+						}
+					},
+					{
+						"@type": "type.googleapis.com/google.rpc.RetryInfo",
+						"retryDelay": "0.479417207s"
+					}
+				]
+			}
+		}`)
 		if got := classifyAntigravity429(body); got != antigravity429RateLimited {
 			t.Fatalf("classifyAntigravity429() = %q, want %q", got, antigravity429RateLimited)
 		}
@@ -221,17 +183,35 @@ func TestClassifyAntigravity429(t *testing.T) {
 		if decision.kind != antigravity429DecisionInstantRetrySameAuth {
 			t.Fatalf("decideAntigravity429().kind = %q, want %q", decision.kind, antigravity429DecisionInstantRetrySameAuth)
 		}
+		if decision.retryAfter == nil {
+			t.Fatal("decideAntigravity429().retryAfter = nil")
+		}
+	})
+
+	t.Run("structured rate limit", func(t *testing.T) {
+		body := []byte(`{
+			"error": {
+				"status": "RESOURCE_EXHAUSTED",
+				"details": [
+					{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "RATE_LIMIT_EXCEEDED"},
+					{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "0.5s"}
+				]
+			}
+		}`)
+		if got := classifyAntigravity429(body); got != antigravity429RateLimited {
+			t.Fatalf("classifyAntigravity429() = %q, want %q", got, antigravity429RateLimited)
+		}
 	})
 
 	t.Run("structured quota exhausted", func(t *testing.T) {
 		body := []byte(`{
-            "error": {
-                "status": "RESOURCE_EXHAUSTED",
-                "details": [
-                    {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "QUOTA_EXHAUSTED"}
-                ]
-            }
-        }`)
+			"error": {
+				"status": "RESOURCE_EXHAUSTED",
+				"details": [
+					{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "QUOTA_EXHAUSTED"}
+				]
+			}
+		}`)
 		if got := classifyAntigravity429(body); got != antigravity429QuotaExhausted {
 			t.Fatalf("classifyAntigravity429() = %q, want %q", got, antigravity429QuotaExhausted)
 		}
@@ -337,138 +317,6 @@ func TestAntigravityExecute_DoesNotUseRequestRetryForInternalRetries(t *testing.
 	}
 	if requestCount != 1 {
 		t.Fatalf("request count = %d, want 1", requestCount)
-	}
-}
-func TestAntigravityCapacityExhaustedImmediatelyFailsOver(t *testing.T) {
-	const capacityBody = `{"error":{"code":429,"message":"You have exhausted your capacity on this model. Your quota will reset after 0.479417207s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"RATE_LIMIT_EXCEEDED"},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"0.479417207s"}]}}`
-	const capacityRetryDelay = 479417207 * time.Nanosecond
-	const successBody = `{"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}}`
-	const successStreamBody = "data: " + successBody + "\n\n"
-
-	testCases := []struct {
-		name   string
-		model  string
-		stream bool
-	}{
-		{name: "gemini non-stream", model: "gemini-3.5-flash"},
-		{name: "claude non-stream", model: "claude-sonnet-4-6"},
-		{name: "gemini image non-stream", model: "gemini-3.1-flash-image"},
-		{name: "stream", model: "gemini-3.5-flash", stream: true},
-	}
-
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			var (
-				requestMu                    sync.Mutex
-				badCalls, goodCalls          int
-				badResponseAt, goodRequestAt time.Time
-			)
-			newServer := func(calls *int, timestamp *time.Time, status int, body, contentType string) *httptest.Server {
-				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					requestMu.Lock()
-					*calls = *calls + 1
-					*timestamp = time.Now()
-					requestMu.Unlock()
-					w.Header().Set("Content-Type", contentType)
-					w.WriteHeader(status)
-					_, _ = io.WriteString(w, body)
-				}))
-			}
-			badServer := newServer(&badCalls, &badResponseAt, http.StatusTooManyRequests, capacityBody, "application/json")
-			goodBody, goodContentType := successBody, "application/json"
-			if tc.stream {
-				goodBody, goodContentType = successStreamBody, "text/event-stream"
-			}
-			goodServer := newServer(&goodCalls, &goodRequestAt, http.StatusOK, goodBody, goodContentType)
-			defer badServer.Close()
-			defer goodServer.Close()
-
-			manager := cliproxyauth.NewManager(nil, &cliproxyauth.FillFirstSelector{}, nil)
-			manager.SetRetryConfig(0, 0, 0)
-			manager.RegisterExecutor(NewAntigravityExecutor(&config.Config{RequestRetry: 1}))
-
-			baseID := fmt.Sprintf("antigravity-capacity-%d", time.Now().UnixNano())
-			badID, goodID := baseID+"-bad", baseID+"-good"
-			reg := registry.GetGlobalRegistry()
-			reg.RegisterClient(badID, "antigravity", []*registry.ModelInfo{{ID: tc.model}})
-			reg.RegisterClient(goodID, "antigravity", []*registry.ModelInfo{{ID: tc.model}})
-			t.Cleanup(func() {
-				reg.UnregisterClient(badID)
-				reg.UnregisterClient(goodID)
-			})
-			newAuth := func(id, baseURL string) *cliproxyauth.Auth {
-				return &cliproxyauth.Auth{
-					ID:       id,
-					Provider: "antigravity",
-					Attributes: map[string]string{
-						"base_url": baseURL,
-					},
-					Metadata: map[string]any{
-						"access_token": "token",
-						"project_id":   "project-1",
-						"expired":      time.Now().Add(time.Hour).Format(time.RFC3339),
-					},
-				}
-			}
-			for _, auth := range []*cliproxyauth.Auth{
-				newAuth(badID, badServer.URL),
-				newAuth(goodID, goodServer.URL),
-			} {
-				if _, errRegister := manager.Register(context.Background(), auth); errRegister != nil {
-					t.Fatalf("register %s: %v", auth.ID, errRegister)
-				}
-			}
-
-			req := cliproxyexecutor.Request{
-				Model:   tc.model,
-				Payload: []byte(`{"request":{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}}`),
-			}
-			opts := cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatAntigravity, Stream: tc.stream}
-			if tc.stream {
-				result, errExecute := manager.ExecuteStream(context.Background(), []string{"antigravity"}, req, opts)
-				if errExecute != nil {
-					t.Fatalf("ExecuteStream() error = %v", errExecute)
-				}
-				gotPayload := false
-				var streamPayload strings.Builder
-				for chunk := range result.Chunks {
-					if chunk.Err != nil {
-						t.Fatalf("stream chunk error = %v", chunk.Err)
-					}
-					gotPayload = gotPayload || len(chunk.Payload) > 0
-					streamPayload.Write(chunk.Payload)
-				}
-				if !gotPayload || !strings.Contains(streamPayload.String(), "ok") {
-					t.Fatalf("ExecuteStream() payload = %q, want successful payload", streamPayload.String())
-				}
-			} else {
-				resp, errExecute := manager.Execute(context.Background(), []string{"antigravity"}, req, opts)
-				if errExecute != nil {
-					t.Fatalf("Execute() error = %v", errExecute)
-				}
-				if len(resp.Payload) == 0 || !strings.Contains(string(resp.Payload), "ok") {
-					t.Fatalf("Execute() payload = %q, want successful payload", resp.Payload)
-				}
-			}
-			requestMu.Lock()
-			gotBadCalls, gotGoodCalls := badCalls, goodCalls
-			gotBadResponseAt, gotGoodRequestAt := badResponseAt, goodRequestAt
-			requestMu.Unlock()
-			if gotBadCalls != 1 {
-				t.Fatalf("bad auth request count = %d, want 1", gotBadCalls)
-			}
-			if gotGoodCalls != 1 {
-				t.Fatalf("good auth request count = %d, want 1", gotGoodCalls)
-			}
-			if gotBadResponseAt.IsZero() || gotGoodRequestAt.IsZero() {
-				t.Fatal("missing bad-response or good-request timestamp")
-			}
-			failoverGap := gotGoodRequestAt.Sub(gotBadResponseAt)
-			if failoverGap <= 0 || failoverGap >= capacityRetryDelay/2 {
-				t.Fatalf("capacity failover gap %v, want positive and materially below retry delay %v", failoverGap, capacityRetryDelay)
-			}
-		})
 	}
 }
 

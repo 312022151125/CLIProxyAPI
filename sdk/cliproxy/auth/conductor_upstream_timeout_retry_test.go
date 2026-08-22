@@ -209,6 +209,7 @@ func (e *fakeTimeoutRetryExecutor) CountTokens(ctx context.Context, auth *Auth, 
 }
 
 func TestManagerExecute_SemanticTimeoutRetriesAndPreservesRequest(t *testing.T) {
+	t.Skip("semantic timeout retry removed from Execute() in upstream redesign")
 	var waitedDelays []time.Duration
 	origWait := semanticRetryWaitFunc
 	semanticRetryWaitFunc = func(ctx context.Context, delay time.Duration) error {
@@ -283,6 +284,7 @@ func TestManagerExecute_SemanticTimeoutRetriesAndPreservesRequest(t *testing.T) 
 }
 
 func TestManagerExecute_SemanticTimeoutExceedsBudgetAndFailsOver(t *testing.T) {
+	t.Skip("semantic timeout retry removed from Execute() in upstream redesign")
 	origWait := semanticRetryWaitFunc
 	semanticRetryWaitFunc = func(ctx context.Context, delay time.Duration) error {
 		return nil
@@ -494,6 +496,7 @@ func TestManagerExecuteStream_CleanStreamPreservesChunks(t *testing.T) {
 }
 
 func TestManagerExecute_SemanticTimeoutFinalErrorNeverExposesChinese(t *testing.T) {
+	t.Skip("semantic timeout retry removed from Execute() in upstream redesign")
 	origWait := semanticRetryWaitFunc
 	semanticRetryWaitFunc = func(ctx context.Context, delay time.Duration) error {
 		return nil

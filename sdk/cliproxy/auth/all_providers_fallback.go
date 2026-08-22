@@ -4,29 +4,15 @@ import (
 	"context"
 	"strings"
 
-	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
-// fallbackToAllProvidersEnabled reports whether cross-provider fallback is enabled
-// from the runtime config snapshot.
-// Default is enabled (nil); only an explicit false disables it.
-func fallbackToAllProvidersEnabled(cfg *internalconfig.Config) bool {
-	if cfg == nil || cfg.FallbackToAllProviders == nil {
-		return true // default enabled
-	}
-	return *cfg.FallbackToAllProviders
-}
-
 // shouldAttemptAllProvidersFallback reports whether the conductor should retry
 // the request across all providers that support the model after the primary set fails.
+// Cross-provider fallback is always enabled.
 func (m *Manager) shouldAttemptAllProvidersFallback() bool {
-	if m == nil {
-		return false
-	}
-	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
-	return fallbackToAllProvidersEnabled(cfg)
+	return m != nil
 }
 
 // modelProvidersFallback returns every provider registered for the given model

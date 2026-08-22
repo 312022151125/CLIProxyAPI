@@ -226,7 +226,10 @@ func decideAntigravity429(body []byte) antigravity429Decision {
 
 	// Capacity exhaustion on this model never recovers within the retry window,
 	// so switch credentials immediately instead of retrying the same auth.
-	if strings.Contains(string(body), antigravityCapacityExhaustedSentence) {
+	// Exception: when the provider marks the message as a UI display string
+	// (uiMessage:"true" in ErrorInfo.metadata) the sentence is decorative and
+	// the structured details (RATE_LIMIT_EXCEEDED + RetryInfo) take precedence.
+	if strings.Contains(string(body), antigravityCapacityExhaustedSentence) && !antigravityIsUIMessage(body) {
 		decision.kind = antigravity429DecisionImmediateSwitchAuth
 		return decision
 	}
@@ -277,6 +280,26 @@ func decideAntigravity429(body []byte) antigravity429Decision {
 
 	decision.kind = antigravity429DecisionSoftRetry
 	return decision
+}
+
+// antigravityIsUIMessage reports whether the error details contain an ErrorInfo
+// entry with metadata.uiMessage set to "true". When present, any human-readable
+// capacity-exhaustion sentence in the error message is a UI hint only; the
+// structured reason and RetryInfo delay are the authoritative retry signal.
+func antigravityIsUIMessage(body []byte) bool {
+	details := gjson.GetBytes(body, "error.details")
+	if !details.Exists() || !details.IsArray() {
+		return false
+	}
+	for _, detail := range details.Array() {
+		if detail.Get("@type").String() != "type.googleapis.com/google.rpc.ErrorInfo" {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(detail.Get("metadata.uiMessage").String()), "true") {
+			return true
+		}
+	}
+	return false
 }
 
 func antigravityCreditsRetryEnabled(cfg *config.Config) bool {

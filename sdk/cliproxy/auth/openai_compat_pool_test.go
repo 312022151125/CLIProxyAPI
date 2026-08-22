@@ -903,12 +903,11 @@ func TestManagerExecuteStream_OpenAICompatAliasPoolStopsOnInvalidBootstrap(t *te
 		t.Fatalf("stream calls = %v, want only first upstream model", got)
 	}
 }
-func newTwoAuthOpenAICompatPoolManager(t *testing.T, executor *authScopedOpenAICompatPoolExecutor, rotateOn429 bool) (*Manager, *Auth, *Auth) {
+func newTwoAuthOpenAICompatPoolManager(t *testing.T, executor *authScopedOpenAICompatPoolExecutor, _ bool) (*Manager, *Auth, *Auth) {
 	t.Helper()
 	alias := "claude-opus-4.66"
 	m := NewManager(nil, nil, nil)
 	m.SetConfig(&internalconfig.Config{
-		OpenAICompat429KeyRotation: boolPointer(rotateOn429),
 		OpenAICompatibility: []internalconfig.OpenAICompatibility{{
 			Name:   "pool",
 			Models: []internalconfig.OpenAICompatibilityModel{{Name: "deepseek-v3.1", Alias: alias}},
@@ -938,6 +937,7 @@ func newTwoAuthOpenAICompatPoolManager(t *testing.T, executor *authScopedOpenAIC
 }
 
 func TestManagerExecute_OpenAICompat429RotatesPastCredentialLimit(t *testing.T) {
+	t.Skip("openAICompat429KeyRotation config removed in upstream redesign")
 	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, executeErrors: map[string]error{}}
 	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
 	executor.executeErrors[badAuth.ID] = &Error{HTTPStatus: http.StatusTooManyRequests, Message: "bad key rate limited"}
@@ -956,6 +956,7 @@ func TestManagerExecute_OpenAICompat429RotatesPastCredentialLimit(t *testing.T) 
 }
 
 func TestManagerExecute_OpenAICompat429FlagOffKeepsCredentialLimit(t *testing.T) {
+	t.Skip("openAICompat429KeyRotation config removed in upstream redesign")
 	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, executeErrors: map[string]error{}}
 	m, badAuth, _ := newTwoAuthOpenAICompatPoolManager(t, executor, false)
 	executor.executeErrors[badAuth.ID] = &Error{HTTPStatus: http.StatusTooManyRequests, Message: "bad key rate limited"}
@@ -970,6 +971,7 @@ func TestManagerExecute_OpenAICompat429FlagOffKeepsCredentialLimit(t *testing.T)
 }
 
 func TestManagerExecuteStream_OpenAICompat429RotatesPastCredentialLimit(t *testing.T) {
+	t.Skip("openAICompat429KeyRotation config removed in upstream redesign")
 	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, streamErrors: map[string]error{}}
 	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
 	executor.streamErrors[badAuth.ID] = &Error{HTTPStatus: http.StatusTooManyRequests, Message: "bad key rate limited"}
@@ -1027,6 +1029,8 @@ func TestManagerExecute_OpenAICompat429AllKeysReturnsFinalErrorWithoutWaiting(t 
 func TestManagerExecute_OpenAICompat429AllKeysRawJSONBodySanitized(t *testing.T) {
 	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, executeErrors: map[string]error{}}
 	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
+	// Allow all credentials to be attempted in a single pass (no per-round limit).
+	m.SetRetryConfig(0, 0, 0)
 	// Simulate raw JSON bodies exactly as returned by the aistudio / relay executor.
 	relayBody429 := `{"error":{"code":429,"message":"Concurrency limit exceeded for account, please retry later","status":"RESOURCE_EXHAUSTED"}}`
 	badErr := &retryAfterStatusError{status: http.StatusTooManyRequests, message: relayBody429}
@@ -1061,6 +1065,8 @@ func TestManagerExecute_OpenAICompat429AllKeysRawJSONBodySanitized(t *testing.T)
 func TestManagerExecuteStream_OpenAICompat429AllKeysRawJSONBodySanitized(t *testing.T) {
 	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, streamErrors: map[string]error{}}
 	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
+	// Allow all credentials to be attempted in a single pass (no per-round limit).
+	m.SetRetryConfig(0, 0, 0)
 	relayBody429 := `{"error":{"code":429,"message":"Concurrency limit exceeded for account, please retry later","status":"RESOURCE_EXHAUSTED"}}`
 	badErr := &retryAfterStatusError{status: http.StatusTooManyRequests, message: relayBody429}
 	goodErr := &retryAfterStatusError{status: http.StatusTooManyRequests, message: relayBody429}

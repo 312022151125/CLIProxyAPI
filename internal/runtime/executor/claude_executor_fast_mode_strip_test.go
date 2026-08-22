@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
@@ -83,5 +84,60 @@ func TestStripClaudeFastModeIfDisabled_SpeedNotFastPreserved(t *testing.T) {
 	outBody, _ := stripClaudeFastModeIfDisabled(cfg, body, nil)
 	if v := gjson.GetBytes(outBody, "speed"); !v.Exists() || v.String() != "normal" {
 		t.Errorf("expected non-fast speed preserved, got %q", v.String())
+	}
+}
+
+func TestStripFastModeBetaFromBetaString_NoFastBeta(t *testing.T) {
+	input := "claude-code-20250219,interleaved-thinking-2025-05-14"
+	out := stripFastModeBetaFromBetaString(input)
+	if out != input {
+		t.Errorf("expected unchanged when no fast beta, got %q", out)
+	}
+}
+
+func TestStripFastModeBetaFromBetaString_OnlyFastBeta(t *testing.T) {
+	out := stripFastModeBetaFromBetaString(claudeFastModeBeta)
+	if out != "" {
+		t.Errorf("expected empty string when only fast beta, got %q", out)
+	}
+}
+
+func TestStripFastModeBetaFromBetaString_FastBetaAtStart(t *testing.T) {
+	input := claudeFastModeBeta + ",interleaved-thinking-2025-05-14,claude-code-20250219"
+	out := stripFastModeBetaFromBetaString(input)
+	if strings.Contains(out, claudeFastModeBeta) {
+		t.Errorf("expected fast beta removed from start, got %q", out)
+	}
+	if !strings.Contains(out, "interleaved-thinking-2025-05-14") || !strings.Contains(out, "claude-code-20250219") {
+		t.Errorf("expected other betas preserved, got %q", out)
+	}
+}
+
+func TestStripFastModeBetaFromBetaString_FastBetaAtEnd(t *testing.T) {
+	input := "claude-code-20250219,interleaved-thinking-2025-05-14," + claudeFastModeBeta
+	out := stripFastModeBetaFromBetaString(input)
+	if strings.Contains(out, claudeFastModeBeta) {
+		t.Errorf("expected fast beta removed from end, got %q", out)
+	}
+	if !strings.Contains(out, "interleaved-thinking-2025-05-14") {
+		t.Errorf("expected other betas preserved, got %q", out)
+	}
+}
+
+func TestStripFastModeBetaFromBetaString_FastBetaInMiddle(t *testing.T) {
+	input := "claude-code-20250219," + claudeFastModeBeta + ",interleaved-thinking-2025-05-14"
+	out := stripFastModeBetaFromBetaString(input)
+	if strings.Contains(out, claudeFastModeBeta) {
+		t.Errorf("expected fast beta removed from middle, got %q", out)
+	}
+	if !strings.Contains(out, "claude-code-20250219") || !strings.Contains(out, "interleaved-thinking-2025-05-14") {
+		t.Errorf("expected other betas preserved, got %q", out)
+	}
+}
+
+func TestStripFastModeBetaFromBetaString_EmptyString(t *testing.T) {
+	out := stripFastModeBetaFromBetaString("")
+	if out != "" {
+		t.Errorf("expected empty string for empty input, got %q", out)
 	}
 }

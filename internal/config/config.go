@@ -83,6 +83,15 @@ type Config struct {
 	// try in each credential retry round.
 	// Set to 0 or a negative value to keep trying all available credentials (legacy behavior).
 	MaxRetryCredentials int `yaml:"max-retry-credentials" json:"max-retry-credentials"`
+	// OpenAICompat429KeyRotation enables OpenAI-compatible API-key rotation after HTTP 429 responses.
+	// A nil value defaults to true; set false to keep the legacy credential retry limit.
+	OpenAICompat429KeyRotation *bool `yaml:"openai-compat-429-key-rotation" json:"openai-compat-429-key-rotation"`
+	// FallbackToAllProviders controls whether the conductor retries a failed request
+	// across every registered provider type (gemini, codex, xai, claude, openai-compat…)
+	// after all credentials for the primary provider(s) are exhausted.
+	// Credentials with priority=-1 (backup) are still attempted last.
+	// Default is nil (enabled). Set to false to disable cross-provider fallback globally.
+	FallbackToAllProviders *bool `yaml:"fallback-to-all-providers" json:"fallback-to-all-providers"`
 	// MaxRetryInterval defines the maximum positive cooldown wait, in seconds,
 	// allowed before starting another credential retry round. A non-positive value
 	// forbids positive cooldown waits; it does not disable same-round credential
@@ -131,6 +140,12 @@ type Config struct {
 	CodexHeaderDefaults CodexHeaderDefaults `yaml:"codex-header-defaults" json:"codex-header-defaults"`
 
 	// FastServiceTier enables automatic injection of service_tier=priority for all Codex requests.
+	// When true, "priority" is always set on the service_tier field (overwriting any existing value)
+	// to accelerate API response times. Applies to both OAuth and API key Codex requests.
+	// The injection is applied defensively at the last possible moment before sending,
+	// including for follow-up turns that carry previous_response_id.
+	// Note: For long conversation chains, upstream behavior may still vary after the first turn.
+	// When false (default), the service_tier field is left unchanged.
 	FastServiceTier bool `yaml:"fast-service-tier,omitempty" json:"fast-service-tier,omitempty"`
 
 	// ClaudeKey defines a list of Claude API key configurations as specified in the YAML configuration file.

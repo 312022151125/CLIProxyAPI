@@ -76,9 +76,11 @@ type Config struct {
 	// When <= 0, the default worker count is used.
 	AuthAutoRefreshWorkers int `yaml:"auth-auto-refresh-workers" json:"auth-auto-refresh-workers"`
 
-	// RequestRetry defines the retry times when the request failed.
+	// RequestRetry defines the number of additional credential retry rounds after
+	// the first round has exhausted its eligible credentials.
 	RequestRetry int `yaml:"request-retry" json:"request-retry"`
-	// MaxRetryCredentials defines the maximum number of credentials to try for a failed request.
+	// MaxRetryCredentials defines the maximum number of different credentials to
+	// try in each credential retry round.
 	// Set to 0 or a negative value to keep trying all available credentials (legacy behavior).
 	MaxRetryCredentials int `yaml:"max-retry-credentials" json:"max-retry-credentials"`
 	// OpenAICompat429KeyRotation enables OpenAI-compatible API-key rotation after HTTP 429 responses.
@@ -90,7 +92,10 @@ type Config struct {
 	// Credentials with priority=-1 (backup) are still attempted last.
 	// Default is nil (enabled). Set to false to disable cross-provider fallback globally.
 	FallbackToAllProviders *bool `yaml:"fallback-to-all-providers" json:"fallback-to-all-providers"`
-	// MaxRetryInterval defines the maximum wait time in seconds before retrying a cooled-down credential.
+	// MaxRetryInterval defines the maximum positive cooldown wait, in seconds,
+	// allowed before starting another credential retry round. A non-positive value
+	// forbids positive cooldown waits; it does not disable same-round credential
+	// failover or immediate additional rounds allowed by RequestRetry.
 	MaxRetryInterval int `yaml:"max-retry-interval" json:"max-retry-interval"`
 
 	// QuotaExceeded defines the behavior when a quota is exceeded.
@@ -135,12 +140,6 @@ type Config struct {
 	CodexHeaderDefaults CodexHeaderDefaults `yaml:"codex-header-defaults" json:"codex-header-defaults"`
 
 	// FastServiceTier enables automatic injection of service_tier=priority for all Codex requests.
-	// When true, "priority" is always set on the service_tier field (overwriting any existing value)
-	// to accelerate API response times. Applies to both OAuth and API key Codex requests.
-	// The injection is applied defensively at the last possible moment before sending,
-	// including for follow-up turns that carry previous_response_id.
-	// Note: For long conversation chains, upstream behavior may still vary after the first turn.
-	// When false (default), the service_tier field is left unchanged.
 	FastServiceTier bool `yaml:"fast-service-tier,omitempty" json:"fast-service-tier,omitempty"`
 
 	// ClaudeKey defines a list of Claude API key configurations as specified in the YAML configuration file.

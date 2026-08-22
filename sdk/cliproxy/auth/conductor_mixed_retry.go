@@ -192,11 +192,11 @@ func unwrapMixedRetryPassExhausted(err error) (error, bool) {
 // runMixedRetry runs the full retry cycle for a non-streaming execution.
 // It returns the first successful response, or the last error if all attempts fail.
 func (m *Manager) runMixedRetry(ctx context.Context, normalized []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
-	_, maxRetryCredentials, maxWait := m.retrySettings()
+	defaultRequestRetry, maxRetryCredentials, maxWait := m.retrySettings()
 	var lastErr error
 	retryModel := authSelectionModelFromOptions(opts, req.Model)
 	for attempt := 0; ; attempt++ {
-		resp, errExec := m.executeMixedOnce(ctx, normalized, req, opts, maxRetryCredentials)
+		resp, errExec := m.executeMixedOnce(ctx, normalized, req, opts, maxRetryCredentials, attempt, defaultRequestRetry)
 		if errExec == nil {
 			return resp, nil
 		}
@@ -232,11 +232,12 @@ func (m *Manager) runMixedRetry(ctx context.Context, normalized []string, req cl
 // runStreamMixedRetry runs the full retry cycle for a streaming execution.
 // It returns the first successful StreamResult, or the last error if all attempts fail.
 func (m *Manager) runStreamMixedRetry(ctx context.Context, normalized []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
-	_, maxRetryCredentials, maxWait := m.retrySettings()
+	defaultRequestRetry, maxRetryCredentials, maxWait := m.retrySettings()
 	var lastErr error
 	retryModel := authSelectionModelFromOptions(opts, req.Model)
+	homeRetryLimit := -1
 	for attempt := 0; ; attempt++ {
-		result, errStream := m.executeStreamMixedOnce(ctx, normalized, req, opts, maxRetryCredentials)
+		result, errStream := m.executeStreamMixedOnce(ctx, normalized, req, opts, maxRetryCredentials, &homeRetryLimit, attempt, defaultRequestRetry)
 		if errStream == nil {
 			return result, nil
 		}

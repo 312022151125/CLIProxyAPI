@@ -49,3 +49,33 @@ func TestApplyCodexFastServiceTier_EmptyBody(t *testing.T) {
 		t.Errorf("expected nil for nil body, got %s", string(result))
 	}
 }
+
+func TestApplyCodexFastServiceTier_DisabledStripsExistingServiceTier(t *testing.T) {
+	cfg := &config.Config{FastServiceTier: false}
+	body := []byte(`{"model":"gpt-5-codex","service_tier":"flex"}`)
+	result := applyCodexFastServiceTier(cfg, body)
+	if v := gjson.GetBytes(result, "service_tier"); v.Exists() {
+		t.Errorf("expected service_tier removed when FastServiceTier=false, got %q", v.String())
+	}
+}
+
+func TestApplyCodexFastServiceTier_DisabledStripsServiceTierPriority(t *testing.T) {
+	cfg := &config.Config{FastServiceTier: false}
+	body := []byte(`{"model":"gpt-5-codex","service_tier":"priority"}`)
+	result := applyCodexFastServiceTier(cfg, body)
+	if v := gjson.GetBytes(result, "service_tier"); v.Exists() {
+		t.Errorf("expected service_tier removed when FastServiceTier=false, got %q", v.String())
+	}
+}
+
+func TestApplyCodexFastServiceTier_DisabledNoServiceTierIsNoop(t *testing.T) {
+	cfg := &config.Config{FastServiceTier: false}
+	body := []byte(`{"model":"gpt-5-codex"}`)
+	result := applyCodexFastServiceTier(cfg, body)
+	if v := gjson.GetBytes(result, "service_tier"); v.Exists() {
+		t.Errorf("expected no service_tier, got %q", v.String())
+	}
+	if v := gjson.GetBytes(result, "model"); v.String() != "gpt-5-codex" {
+		t.Errorf("expected model preserved, got %q", v.String())
+	}
+}

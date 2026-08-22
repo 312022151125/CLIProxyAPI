@@ -97,12 +97,21 @@ func (e *CodexExecutor) retryAfterCodexTokenInvalidated(
 	return retryResp, auth, identityState, true, nil
 }
 
-// applyCodexFastServiceTier injects service_tier=priority at the very last moment
-// before sending, so it survives all prior payload processing.
+// applyCodexFastServiceTier applies fast-service-tier policy at the very last
+// moment before sending, so it survives all prior payload processing.
+//
+// When fast-service-tier is enabled, service_tier is forced to "priority".
+// When fast-service-tier is disabled, any service_tier the caller sent is
+// stripped so that fast-mode requests never reach the upstream.
 func applyCodexFastServiceTier(cfg *config.Config, body []byte) []byte {
-	if cfg == nil || !cfg.FastServiceTier || len(body) == 0 {
+	if cfg == nil || len(body) == 0 {
 		return body
 	}
-	body, _ = sjson.SetBytes(body, "service_tier", "priority")
+	if cfg.FastServiceTier {
+		body, _ = sjson.SetBytes(body, "service_tier", "priority")
+		return body
+	}
+	// fast-service-tier=false: remove any service_tier the caller supplied.
+	body, _ = sjson.DeleteBytes(body, "service_tier")
 	return body
 }

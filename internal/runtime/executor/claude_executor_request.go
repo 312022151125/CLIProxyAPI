@@ -173,6 +173,30 @@ func claudeRequestUsesFastMode(body []byte, requested map[string]bool) bool {
 	return speed.Type == gjson.String && strings.EqualFold(strings.TrimSpace(speed.String()), "fast")
 }
 
+// stripClaudeFastModeIfDisabled removes all fast-mode signals from the body and
+// extraBetas when fast-service-tier is disabled in the configuration. It strips
+// the speed field from the body and removes the fast-mode-2026-02-01 beta from
+// extraBetas, so downstream header construction and fast-request detection both
+// see a request that never asked for fast mode.
+func stripClaudeFastModeIfDisabled(cfg *config.Config, body []byte, extraBetas []string) ([]byte, []string) {
+	if cfg == nil || cfg.FastServiceTier {
+		return body, extraBetas
+	}
+	// Strip speed field if it is "fast".
+	if speed := gjson.GetBytes(body, "speed"); speed.Type == gjson.String &&
+		strings.EqualFold(strings.TrimSpace(speed.String()), "fast") {
+		body, _ = sjson.DeleteBytes(body, "speed")
+	}
+	// Remove fast-mode-2026-02-01 from extraBetas.
+	filtered := extraBetas[:0:0]
+	for _, b := range extraBetas {
+		if strings.TrimSpace(b) != claudeFastModeBeta {
+			filtered = append(filtered, b)
+		}
+	}
+	return body, filtered
+}
+
 // claudeCountTokensBetas is the fixed profile Claude Code 2.1.220 sends to
 // /v1/messages/count_tokens. It is far smaller than the inference baseline:
 // redact-thinking, thinking-token-count, prompt-caching-scope, effort and every

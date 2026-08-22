@@ -2000,7 +2000,6 @@ func TestSchedulerPick_MixedBackupPriorityLastResort(t *testing.T) {
 // reached by non-backup credentials. All backup credentials are tried in order
 // before returning an error.
 func TestBackupAuthBypassesMaxRetryCredentialsLimit(t *testing.T) {
-	t.Skip("hasUntriedBackupAuth removed from executeMixedOnce in upstream redesign")
 	model := "test-model"
 	reg := registry.GetGlobalRegistry()
 	for _, id := range []string{"normal-a", "normal-b", "backup-1", "backup-2"} {

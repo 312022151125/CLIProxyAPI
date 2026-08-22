@@ -903,7 +903,7 @@ func TestManagerExecuteStream_OpenAICompatAliasPoolStopsOnInvalidBootstrap(t *te
 		t.Fatalf("stream calls = %v, want only first upstream model", got)
 	}
 }
-func newTwoAuthOpenAICompatPoolManager(t *testing.T, executor *authScopedOpenAICompatPoolExecutor, _ bool) (*Manager, *Auth, *Auth) {
+func newTwoAuthOpenAICompatPoolManager(t *testing.T, executor *authScopedOpenAICompatPoolExecutor) (*Manager, *Auth, *Auth) {
 	t.Helper()
 	alias := "claude-opus-4.66"
 	m := NewManager(nil, nil, nil)
@@ -937,9 +937,8 @@ func newTwoAuthOpenAICompatPoolManager(t *testing.T, executor *authScopedOpenAIC
 }
 
 func TestManagerExecute_OpenAICompat429RotatesPastCredentialLimit(t *testing.T) {
-	t.Skip("openAICompat429KeyRotation config removed in upstream redesign")
 	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, executeErrors: map[string]error{}}
-	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
+	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor)
 	executor.executeErrors[badAuth.ID] = &Error{HTTPStatus: http.StatusTooManyRequests, Message: "bad key rate limited"}
 
 	resp, err := m.Execute(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: "claude-opus-4.66"}, cliproxyexecutor.Options{})
@@ -955,25 +954,9 @@ func TestManagerExecute_OpenAICompat429RotatesPastCredentialLimit(t *testing.T) 
 	}
 }
 
-func TestManagerExecute_OpenAICompat429FlagOffKeepsCredentialLimit(t *testing.T) {
-	t.Skip("openAICompat429KeyRotation config removed in upstream redesign")
-	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, executeErrors: map[string]error{}}
-	m, badAuth, _ := newTwoAuthOpenAICompatPoolManager(t, executor, false)
-	executor.executeErrors[badAuth.ID] = &Error{HTTPStatus: http.StatusTooManyRequests, Message: "bad key rate limited"}
-
-	_, err := m.Execute(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: "claude-opus-4.66"}, cliproxyexecutor.Options{})
-	if err == nil || statusCodeFromError(err) != http.StatusTooManyRequests {
-		t.Fatalf("execute error = %v, want legacy 429", err)
-	}
-	if got := executor.ExecuteCalls(); len(got) != 1 || !strings.HasPrefix(got[0], badAuth.ID+"|") {
-		t.Fatalf("execute calls = %v, want only limited credential", got)
-	}
-}
-
 func TestManagerExecuteStream_OpenAICompat429RotatesPastCredentialLimit(t *testing.T) {
-	t.Skip("openAICompat429KeyRotation config removed in upstream redesign")
 	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, streamErrors: map[string]error{}}
-	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
+	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor)
 	executor.streamErrors[badAuth.ID] = &Error{HTTPStatus: http.StatusTooManyRequests, Message: "bad key rate limited"}
 
 	streamResult, err := m.ExecuteStream(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: "claude-opus-4.66"}, cliproxyexecutor.Options{})
@@ -991,7 +974,7 @@ func TestManagerExecuteStream_OpenAICompat429RotatesPastCredentialLimit(t *testi
 
 func TestManagerExecute_OpenAICompat429AllKeysReturnsFinalErrorWithoutWaiting(t *testing.T) {
 	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, executeErrors: map[string]error{}}
-	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
+	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor)
 	m.SetRetryConfig(1, 30*time.Second, 1)
 	badErr := &retryAfterStatusError{status: http.StatusTooManyRequests, message: "bad key rate limited", retryAfter: 10 * time.Second}
 	goodErr := &retryAfterStatusError{status: http.StatusTooManyRequests, message: "good key rate limited", retryAfter: 10 * time.Second}
@@ -1028,7 +1011,7 @@ func TestManagerExecute_OpenAICompat429AllKeysReturnsFinalErrorWithoutWaiting(t 
 // and does not expose the internal provider details to the user.
 func TestManagerExecute_OpenAICompat429AllKeysRawJSONBodySanitized(t *testing.T) {
 	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, executeErrors: map[string]error{}}
-	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
+	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor)
 	// Allow all credentials to be attempted in a single pass (no per-round limit).
 	m.SetRetryConfig(0, 0, 0)
 	// Simulate raw JSON bodies exactly as returned by the aistudio / relay executor.
@@ -1064,7 +1047,7 @@ func TestManagerExecute_OpenAICompat429AllKeysRawJSONBodySanitized(t *testing.T)
 // counterpart of TestManagerExecute_OpenAICompat429AllKeysRawJSONBodySanitized.
 func TestManagerExecuteStream_OpenAICompat429AllKeysRawJSONBodySanitized(t *testing.T) {
 	executor := &authScopedOpenAICompatPoolExecutor{id: openAICompatPoolProviderKey, streamErrors: map[string]error{}}
-	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor, true)
+	m, badAuth, goodAuth := newTwoAuthOpenAICompatPoolManager(t, executor)
 	// Allow all credentials to be attempted in a single pass (no per-round limit).
 	m.SetRetryConfig(0, 0, 0)
 	relayBody429 := `{"error":{"code":429,"message":"Concurrency limit exceeded for account, please retry later","status":"RESOURCE_EXHAUSTED"}}`

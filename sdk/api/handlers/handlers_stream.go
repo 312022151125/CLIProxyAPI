@@ -373,6 +373,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormatsOnce(ctx context.Con
 		Query:                       modelExecutionQuery(ctx, execOptions.Query),
 		Method:                      execOptions.Method,
 		RequestAfterAuthInterceptor: h.requestAfterAuthInterceptor(afterAuthCapture, lifecycle.requestID(), execOptions.SkipInterceptorPluginID),
+		WebSocketResponseObserver:   h.webSocketResponseObserver(lifecycle.requestID(), execOptions.SkipInterceptorPluginID),
 	}
 	opts.Metadata = reqMeta
 	var interceptErr *interfaces.ErrorMessage

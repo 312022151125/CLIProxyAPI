@@ -100,7 +100,6 @@ func IsRequestFault(status int, err error) bool {
 	}
 	switch status {
 	case http.StatusBadRequest,
-		http.StatusConflict,
 		http.StatusRequestEntityTooLarge,
 		http.StatusUnprocessableEntity:
 		return true

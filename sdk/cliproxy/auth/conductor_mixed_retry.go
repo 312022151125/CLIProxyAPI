@@ -338,7 +338,13 @@ func isRetryableStatusCode(status int) bool {
 	switch status {
 	case http.StatusTooManyRequests,
 		http.StatusPaymentRequired,
-		http.StatusForbidden:
+		http.StatusForbidden,
+		http.StatusConflict,
+		http.StatusRequestTimeout,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
 		return true
 	}
 	return false

@@ -2633,7 +2633,7 @@ func TestShouldExposeResponsesUpstreamError(t *testing.T) {
 		want   bool
 	}{
 		{status: http.StatusBadRequest, want: true},
-		{status: http.StatusConflict, want: true},
+		{status: http.StatusConflict, want: false},
 		{status: http.StatusRequestEntityTooLarge, want: true},
 		{status: http.StatusUnprocessableEntity, want: true},
 		{status: http.StatusUnauthorized},
@@ -2664,7 +2664,7 @@ func TestResponsesUpstreamErrorBodyDrivesExposure(t *testing.T) {
 		want   bool
 	}{
 		{name: "bad request", status: http.StatusBadRequest, body: "bad request", want: true},
-		{name: "conflict", status: http.StatusConflict, body: "conflict", want: true},
+		{name: "conflict", status: http.StatusConflict, body: "conflict", want: false},
 		{name: "entity too large", status: http.StatusRequestEntityTooLarge, body: "too large", want: true},
 		{name: "unprocessable", status: http.StatusUnprocessableEntity, body: "unprocessable", want: true},
 		{

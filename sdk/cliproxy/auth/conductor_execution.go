@@ -555,7 +555,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 	attempted := make(map[string]struct{})
 	var lastErr error
 	for {
-		if maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials {
+		if maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials && !m.hasUntriedBackupAuth(providers, tried) {
 			if lastErr != nil {
 				return cliproxyexecutor.Response{}, lastErr
 			}

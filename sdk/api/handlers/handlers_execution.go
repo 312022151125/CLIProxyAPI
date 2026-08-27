@@ -113,6 +113,7 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormatsOnce(ctx context.Context, 
 		Query:                       modelExecutionQuery(ctx, execOptions.Query),
 		Method:                      execOptions.Method,
 		RequestAfterAuthInterceptor: h.requestAfterAuthInterceptor(afterAuthCapture, lifecycle.requestID(), execOptions.SkipInterceptorPluginID),
+		WebSocketResponseObserver:   h.webSocketResponseObserver(lifecycle.requestID(), execOptions.SkipInterceptorPluginID),
 	}
 	opts.Metadata = reqMeta
 	var interceptErr *interfaces.ErrorMessage
@@ -194,6 +195,7 @@ func (h *BaseAPIHandler) executeCountWithAuthManagerOnce(ctx context.Context, ha
 		Headers:                     modelExecutionHeaders(ctx, execOptions.Headers),
 		Query:                       modelExecutionQuery(ctx, execOptions.Query),
 		RequestAfterAuthInterceptor: h.requestAfterAuthInterceptor(afterAuthCapture, lifecycle.requestID(), execOptions.SkipInterceptorPluginID),
+		WebSocketResponseObserver:   h.webSocketResponseObserver(lifecycle.requestID(), execOptions.SkipInterceptorPluginID),
 	}
 	opts.Metadata = reqMeta
 	var interceptErr *interfaces.ErrorMessage
@@ -313,14 +315,15 @@ func (h *BaseAPIHandler) pluginExecutorRequest(ctx context.Context, entryProtoco
 	}
 	req := coreexecutor.Request{Model: modelName, Payload: payload}
 	opts := coreexecutor.Options{
-		Stream:          stream,
-		Alt:             alt,
-		OriginalRequest: rawJSON,
-		SourceFormat:    sdktranslator.FromString(entryProtocol),
-		ResponseFormat:  sdktranslator.FromString(responseProtocol),
-		Headers:         modelExecutionHeaders(ctx, execOptions.Headers),
-		Query:           modelExecutionQuery(ctx, execOptions.Query),
-		Metadata:        reqMeta,
+		Stream:                    stream,
+		Alt:                       alt,
+		OriginalRequest:           rawJSON,
+		SourceFormat:              sdktranslator.FromString(entryProtocol),
+		ResponseFormat:            sdktranslator.FromString(responseProtocol),
+		Headers:                   modelExecutionHeaders(ctx, execOptions.Headers),
+		Query:                     modelExecutionQuery(ctx, execOptions.Query),
+		WebSocketResponseObserver: h.webSocketResponseObserver("", execOptions.SkipInterceptorPluginID),
+		Metadata:                  reqMeta,
 	}
 	return req, opts
 }

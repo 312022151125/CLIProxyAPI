@@ -212,9 +212,60 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		b, _ := io.ReadAll(httpResp.Body)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
+		if helps.IsUnsupportedReasoningParamError(httpResp.StatusCode, b) {
+			stripped := helps.StripReasoningEffortParameters(translated)
+			if !bytes.Equal(stripped, translated) {
+				helps.LogWithRequestID(ctx).Debugf("openai-compat: stripping unsupported reasoning parameter and retrying once")
+				if errClose := httpResp.Body.Close(); errClose != nil {
+					log.Errorf("openai compat executor: close response body error: %v", errClose)
+				}
+				translated = stripped
+				var retryReader io.Reader
+				if len(translated) > 0 {
+					retryReader = bytes.NewReader(translated)
+				}
+				retryReq, errRetry := http.NewRequestWithContext(ctx, method, targetURL, retryReader)
+				if errRetry == nil {
+					if method == http.MethodPost || len(translated) > 0 {
+						retryReq.Header.Set("Content-Type", "application/json")
+					}
+					if apiKey != "" {
+						retryReq.Header.Set("Authorization", "Bearer "+apiKey)
+					}
+					retryReq.Header.Set("User-Agent", "cli-proxy-openai-compat")
+					util.ApplyCustomHeadersFromAttrs(retryReq, attrs, opts.Headers)
+					helps.RecordAPIRequest(ctx, e.cfg, helps.UpstreamRequestLog{
+						URL:       targetURL,
+						Method:    method,
+						Headers:   retryReq.Header.Clone(),
+						Body:      translated,
+						Provider:  e.Identifier(),
+						AuthID:    authID,
+						AuthLabel: authLabel,
+						AuthType:  authType,
+						AuthValue: authValue,
+					})
+					retryResp, errDo := httpClient.Do(retryReq)
+					if errDo == nil {
+						httpResp = retryResp
+						helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
+						if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
+							goto openaiCompatReadExecuteResponse
+						}
+						b, _ = io.ReadAll(httpResp.Body)
+						helps.AppendAPIResponseChunk(ctx, e.cfg, b)
+						helps.LogWithRequestID(ctx).Debugf("request error after unsupported param retry, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
+					} else {
+						helps.RecordAPIResponseError(ctx, e.cfg, errDo)
+						return resp, errDo
+					}
+				}
+			}
+		}
 		err = openAICompatStatusErr(httpResp.StatusCode, string(b))
 		return resp, err
 	}
+openaiCompatReadExecuteResponse:
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
 		helps.RecordAPIResponseError(ctx, e.cfg, err)
@@ -450,12 +501,71 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		b, _ := io.ReadAll(httpResp.Body)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
+		if helps.IsUnsupportedReasoningParamError(httpResp.StatusCode, b) {
+			stripped := helps.StripReasoningEffortParameters(translated)
+			if !bytes.Equal(stripped, translated) {
+				helps.LogWithRequestID(ctx).Debugf("openai-compat: stripping unsupported reasoning parameter and retrying once")
+				if errClose := httpResp.Body.Close(); errClose != nil {
+					log.Errorf("openai compat executor: close response body error: %v", errClose)
+				}
+				translated = stripped
+				var retryReader io.Reader
+				if len(translated) > 0 {
+					retryReader = bytes.NewReader(translated)
+				}
+				retryReq, errRetry := http.NewRequestWithContext(ctx, method, targetURL, retryReader)
+				if errRetry == nil {
+					if method == http.MethodPost || len(translated) > 0 {
+						retryReq.Header.Set("Content-Type", "application/json")
+					}
+					if apiKey != "" {
+						retryReq.Header.Set("Authorization", "Bearer "+apiKey)
+					}
+					retryReq.Header.Set("User-Agent", "cli-proxy-openai-compat")
+					retryReq.Header.Set("Accept", "text/event-stream")
+					retryReq.Header.Set("Cache-Control", "no-cache")
+					retryReq.Header.Set("Accept-Encoding", "identity")
+					util.ApplyCustomHeadersFromAttrs(retryReq, attrs, opts.Headers)
+					helps.RecordAPIRequest(ctx, e.cfg, helps.UpstreamRequestLog{
+						URL:       targetURL,
+						Method:    method,
+						Headers:   retryReq.Header.Clone(),
+						Body:      translated,
+						Provider:  e.Identifier(),
+						AuthID:    authID,
+						AuthLabel: authLabel,
+						AuthType:  authType,
+						AuthValue: authValue,
+					})
+					retryResp, errDo := httpClient.Do(retryReq)
+					if errDo == nil {
+						httpResp = retryResp
+						helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
+						if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+							b, _ = io.ReadAll(httpResp.Body)
+							helps.AppendAPIResponseChunk(ctx, e.cfg, b)
+							helps.LogWithRequestID(ctx).Debugf("request error after unsupported param retry, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
+							if errClose := httpResp.Body.Close(); errClose != nil {
+								log.Errorf("openai compat executor: close response body error: %v", errClose)
+							}
+							err = openAICompatStatusErr(httpResp.StatusCode, string(b))
+							return nil, err
+						}
+						goto openaiCompatStreamContinue
+					} else {
+						helps.RecordAPIResponseError(ctx, e.cfg, errDo)
+						return nil, errDo
+					}
+				}
+			}
+		}
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
 		}
 		err = openAICompatStatusErr(httpResp.StatusCode, string(b))
 		return nil, err
 	}
+openaiCompatStreamContinue:
 	out := make(chan cliproxyexecutor.StreamChunk)
 	go func() {
 		defer close(out)

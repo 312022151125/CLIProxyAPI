@@ -268,16 +268,32 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		}
 		return nil, wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, err)
 	}
-	// Peek body to detect HTML pages returned as 2xx by CDN/gateways.
+	// Peek available bytes to detect HTML pages returned as 2xx by CDN/gateways.
+	// Avoid blocking if fewer than 512 bytes are immediately buffered.
 	{
 		peek := bufio.NewReaderSize(decodedBody, 512)
-		peekedBytes, _ := peek.Peek(512)
-		if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, peekedBytes); bodyErr != nil {
-			if errClose := decodedBody.Close(); errClose != nil {
-				log.Errorf("response body close error: %v", errClose)
+		n := peek.Buffered()
+		if n == 0 {
+			// Read up to 512 bytes non-blocking or first available chunk
+			if p, errPeek := peek.Peek(min(512, max(1, peek.Buffered()))); errPeek == nil && len(p) > 0 {
+				if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, p); bodyErr != nil {
+					if errClose := decodedBody.Close(); errClose != nil {
+						log.Errorf("response body close error: %v", errClose)
+					}
+					helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
+					return nil, wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, bodyErr)
+				}
 			}
-			helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
-			return nil, wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, bodyErr)
+		} else {
+			if p, _ := peek.Peek(min(512, n)); len(p) > 0 {
+				if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, p); bodyErr != nil {
+					if errClose := decodedBody.Close(); errClose != nil {
+						log.Errorf("response body close error: %v", errClose)
+					}
+					helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
+					return nil, wrapClaudeFastRequestError(fastRequest, httpResp.StatusCode, bodyErr)
+				}
+			}
 		}
 		decodedBody = io.NopCloser(peek)
 	}

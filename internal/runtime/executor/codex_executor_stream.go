@@ -206,19 +206,38 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 	}
 
 codexStartStream:
-	// Peek body to detect HTML pages returned as 2xx by CDN/gateways.
+	// Peek available bytes to detect HTML pages returned as 2xx by CDN/gateways.
+	// Avoid blocking if fewer than 512 bytes are immediately buffered.
 	{
 		peek := bufio.NewReaderSize(httpResp.Body, 512)
-		peekedBytes, _ := peek.Peek(512)
-		if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, peekedBytes); bodyErr != nil {
-			if errClose := httpResp.Body.Close(); errClose != nil {
-				log.Errorf("codex executor: close response body error: %v", errClose)
+		n := peek.Buffered()
+		if n == 0 {
+			if p, errPeek := peek.Peek(min(512, max(1, peek.Buffered()))); errPeek == nil && len(p) > 0 {
+				if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, p); bodyErr != nil {
+					if errClose := httpResp.Body.Close(); errClose != nil {
+						log.Errorf("codex executor: close response body error: %v", errClose)
+					}
+					helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
+					err = bodyErr
+					return nil, err
+				}
 			}
-			helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
-			err = bodyErr
-			return nil, err
+		} else {
+			if p, _ := peek.Peek(min(512, n)); len(p) > 0 {
+				if bodyErr := helps.DetectUpstreamErrorBody(httpResp.StatusCode, p); bodyErr != nil {
+					if errClose := httpResp.Body.Close(); errClose != nil {
+						log.Errorf("codex executor: close response body error: %v", errClose)
+					}
+					helps.RecordAPIResponseError(ctx, e.cfg, bodyErr)
+					err = bodyErr
+					return nil, err
+				}
+			}
 		}
-		httpResp.Body = io.NopCloser(peek)
+		httpResp.Body = struct {
+			io.Reader
+			io.Closer
+		}{peek, httpResp.Body}
 	}
 
 	buffering := e.cfg != nil && e.cfg.Codex.StreamBootstrapBuffering

@@ -295,7 +295,10 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 				}
 			}
 		}
-		decodedBody = io.NopCloser(peek)
+		decodedBody = struct {
+			io.Reader
+			io.Closer
+		}{peek, decodedBody}
 	}
 	out := make(chan cliproxyexecutor.StreamChunk, 1)
 	go func() {

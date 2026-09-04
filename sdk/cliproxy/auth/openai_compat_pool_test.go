@@ -16,7 +16,6 @@ import (
 
 const openAICompatPoolProviderKey = "openai-compatible-pool"
 
-func boolPointer(value bool) *bool { return &value }
 
 type openAICompatPoolExecutor struct {
 	id string

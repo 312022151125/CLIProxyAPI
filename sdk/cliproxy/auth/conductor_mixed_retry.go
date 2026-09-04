@@ -105,7 +105,6 @@ func (m *Manager) openAICompatProvidersWithUntriedAuth(providers []string, tried
 	return out
 }
 
-
 // ResolveOpenAICompatColonEffortModel splits a "model:effort" request into its base
 // model and reasoning effort when the OpenAI-compatible provider config declares that
 // effort level for the model. It returns the original model untouched otherwise.

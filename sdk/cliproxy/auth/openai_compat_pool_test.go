@@ -16,7 +16,6 @@ import (
 
 const openAICompatPoolProviderKey = "openai-compatible-pool"
 
-
 type openAICompatPoolExecutor struct {
 	id string
 

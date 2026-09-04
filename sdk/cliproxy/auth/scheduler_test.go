@@ -2209,8 +2209,8 @@ func TestSchedulerPick_BackupPriorityPickedWhenAllNonBackupCoolingDown(t *testin
 	scheduler := newSchedulerForTest(
 		&RoundRobinSelector{},
 		&Auth{
-			ID:       "normal",
-			Provider: "gemini",
+			ID:         "normal",
+			Provider:   "gemini",
 			Attributes: map[string]string{"priority": "0"},
 			ModelStates: map[string]*ModelState{
 				model: {
@@ -2352,7 +2352,9 @@ func (e *captureOrderExecutor) ExecuteStream(_ context.Context, _ *Auth, _ clipr
 	return nil, nil
 }
 
-func (e *captureOrderExecutor) Refresh(_ context.Context, auth *Auth) (*Auth, error) { return auth, nil }
+func (e *captureOrderExecutor) Refresh(_ context.Context, auth *Auth) (*Auth, error) {
+	return auth, nil
+}
 
 func (e *captureOrderExecutor) CountTokens(_ context.Context, _ *Auth, _ cliproxyexecutor.Request, _ cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
 	return cliproxyexecutor.Response{}, nil

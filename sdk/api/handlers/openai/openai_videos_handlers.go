@@ -40,7 +40,7 @@ const (
 	defaultVideosSeconds     = "4"
 	defaultVideosSize        = "720x1280"
 	defaultVideosResolution  = "720p"
-	maxXAIVideoReferences = 7
+	maxXAIVideoReferences    = 7
 )
 
 const defaultVideoAuthBindingTTL = 3 * time.Hour

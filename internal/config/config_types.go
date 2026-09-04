@@ -787,4 +787,3 @@ func (m OpenAICompatibilityModel) ImageEnabled() bool {
 func (m OpenAICompatibilityModel) VideoEnabled() bool {
 	return m.Video == nil || *m.Video
 }
-

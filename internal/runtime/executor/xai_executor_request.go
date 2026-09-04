@@ -505,11 +505,11 @@ func xaiVideoEndpointPath(opts cliproxyexecutor.Options) string {
 type xaiVideoRouteAction int
 
 const (
-	xaiVideoActionPost   xaiVideoRouteAction = iota // POST to a fixed endpoint path
-	xaiVideoActionGet                               // GET /videos (list) or GET /videos/:id
-	xaiVideoActionDelete                            // DELETE /videos/:id
-	xaiVideoActionRemix                             // POST /videos/:id/remix
-	xaiVideoActionGetCharacter                      // GET /videos/characters/:id
+	xaiVideoActionPost         xaiVideoRouteAction = iota // POST to a fixed endpoint path
+	xaiVideoActionGet                                     // GET /videos (list) or GET /videos/:id
+	xaiVideoActionDelete                                  // DELETE /videos/:id
+	xaiVideoActionRemix                                   // POST /videos/:id/remix
+	xaiVideoActionGetCharacter                            // GET /videos/characters/:id
 )
 
 // xaiVideoAction returns the action and any path-embedded ID derived from the Gin route pattern.

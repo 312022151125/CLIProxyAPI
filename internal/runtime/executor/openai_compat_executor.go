@@ -262,7 +262,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 				}
 			}
 		}
-		err = openAICompatStatusErr(httpResp.StatusCode, string(b))
+		err = newOpenAICompatStatusError(httpResp.StatusCode, httpResp.Header, b)
 		return resp, err
 	}
 openaiCompatReadExecuteResponse:
@@ -372,7 +372,7 @@ func (e *OpenAICompatExecutor) executeImages(ctx context.Context, auth *cliproxy
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), body))
-		err = statusErr{code: httpResp.StatusCode, msg: string(body)}
+		err = newOpenAICompatStatusError(httpResp.StatusCode, httpResp.Header, body)
 		return resp, err
 	}
 
@@ -548,7 +548,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 							if errClose := httpResp.Body.Close(); errClose != nil {
 								log.Errorf("openai compat executor: close response body error: %v", errClose)
 							}
-							err = openAICompatStatusErr(httpResp.StatusCode, string(b))
+							err = newOpenAICompatStatusError(httpResp.StatusCode, httpResp.Header, b)
 							return nil, err
 						}
 						goto openaiCompatStreamContinue
@@ -562,7 +562,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
 		}
-		err = openAICompatStatusErr(httpResp.StatusCode, string(b))
+		err = newOpenAICompatStatusError(httpResp.StatusCode, httpResp.Header, b)
 		return nil, err
 	}
 openaiCompatStreamContinue:
@@ -1434,13 +1434,7 @@ func (e *OpenAICompatExecutor) executeVideo(ctx context.Context, auth *cliproxya
 }
 
 func openAICompatStatusErr(code int, msg string) statusErr {
-	err := statusErr{code: code, msg: msg}
-	if code == http.StatusTooManyRequests {
-		if retryAfter, parseErr := helps.ParseRetryDelay([]byte(msg)); parseErr == nil && retryAfter != nil {
-			err.retryAfter = retryAfter
-		}
-	}
-	return err
+	return newOpenAICompatStatusError(code, nil, []byte(msg))
 }
 
 type statusErr struct {
@@ -1457,3 +1451,48 @@ func (e statusErr) Error() string {
 }
 func (e statusErr) StatusCode() int            { return e.code }
 func (e statusErr) RetryAfter() *time.Duration { return e.retryAfter }
+
+const openAICompatTPMFallbackRetryAfter = time.Minute
+
+func newOpenAICompatStatusError(status int, headers http.Header, body []byte) statusErr {
+	return statusErr{
+		code:       status,
+		msg:        string(body),
+		retryAfter: openAICompatRetryAfter(status, headers, body, time.Now()),
+	}
+}
+
+// openAICompatRetryAfter preserves the provider's standard Retry-After signal.
+// Some OpenAI-compatible providers omit that header for explicit per-minute
+// token limits; in that narrow case a one-minute fallback prevents immediate
+// replay of the same large request while keeping the retry wait bounded.
+func openAICompatRetryAfter(status int, headers http.Header, body []byte, now time.Time) *time.Duration {
+	if status != http.StatusTooManyRequests {
+		return nil
+	}
+	if raw := strings.TrimSpace(headers.Get("Retry-After")); raw != "" {
+		if seconds, errParse := strconv.ParseInt(raw, 10, 64); errParse == nil && seconds >= 0 {
+			delay := time.Duration(seconds) * time.Second
+			return &delay
+		}
+		if deadline, errParse := http.ParseTime(raw); errParse == nil {
+			delay := deadline.Sub(now)
+			if delay < 0 {
+				delay = 0
+			}
+			return &delay
+		}
+	}
+	if retryAfter, parseErr := helps.ParseRetryDelay(body); parseErr == nil && retryAfter != nil {
+		return retryAfter
+	}
+
+	code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "error.code").String()))
+	message := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "error.message").String()))
+	if strings.Contains(code, "tpmratelimitexceeded") ||
+		(strings.Contains(message, "tokens per minute") && strings.Contains(message, "limit") && strings.Contains(message, "exceeded")) {
+		delay := openAICompatTPMFallbackRetryAfter
+		return &delay
+	}
+	return nil
+}

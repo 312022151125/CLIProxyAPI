@@ -61,6 +61,7 @@ func (h *BaseAPIHandler) streamWithPluginExecutor(ctx context.Context, entryProt
 		close(errChan)
 		return nil, nil, errChan
 	}
+	execCtx = enrichContextWithSessionHierarchy(execCtx, opts.Headers, req.Payload, opts.Metadata)
 	var reporter *helps.UsageReporter
 	if !execOptions.InternalSource {
 		reporter = helps.NewUsageReporter(execCtx, executorPluginID, modelName, nil)
@@ -380,6 +381,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormatsOnce(ctx context.Con
 		WebSocketResponseObserver:   h.webSocketResponseObserver(lifecycle.requestID(), execOptions.SkipInterceptorPluginID),
 	}
 	opts.Metadata = reqMeta
+	ctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
 	var interceptErr *interfaces.ErrorMessage
 	req, opts, interceptErr = h.applyRequestInterceptorsBeforeAuth(ctx, entryProtocol, originalRequestedModel, lifecycle.requestID(), req, opts, execOptions.SkipInterceptorPluginID)
 	if interceptErr != nil {
@@ -389,6 +391,7 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormatsOnce(ctx context.Con
 		close(errChan)
 		return nil, nil, errChan
 	}
+	ctx = enrichContextWithSessionHierarchy(ctx, opts.Headers, req.Payload, opts.Metadata)
 	streamResult, err := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
 	if err != nil {
 		err = enrichAuthSelectionError(err, providers, normalizedModel)
@@ -409,6 +412,9 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormatsOnce(ctx context.Con
 	}
 	executedRequest := func() (coreexecutor.Request, coreexecutor.Options) {
 		return afterAuthCapture.apply(req, opts)
+	}
+	if executedReq, executedOpts := executedRequest(); len(executedOpts.Headers) > 0 || len(executedReq.Payload) > 0 || len(executedOpts.Metadata) > 0 {
+		ctx = enrichContextWithSessionHierarchy(ctx, executedOpts.Headers, executedReq.Payload, executedOpts.Metadata)
 	}
 	passthroughHeadersEnabled := PassthroughHeadersEnabled(h.Cfg)
 	interceptorHost := h.interceptorHost()

@@ -191,9 +191,9 @@ func TestManager_MarkResult_LaterShorterFailureKeepsLongerModelDeadline(t *testi
 			if state == nil || state.NextRetryAfter.Before(before.Add(5*time.Minute)) {
 				t.Fatalf("precondition failed: 401 deadline missing: %+v", state)
 			}
-	
+
 			tc.second(m, auth.ID)
-	
+
 			updated, _ := m.GetByID(auth.ID)
 			stateAfter := existingModelState(updated, canonicalModelKey("model-a"))
 			if stateAfter == nil {

@@ -827,7 +827,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 						if disableCooling {
 							state.NextRetryAfter = time.Time{}
 						} else {
-							state.NextRetryAfter = now.Add(30 * time.Minute)
+							state.NextRetryAfter = now.Add(10 * time.Minute)
 						}
 					} else {
 						switch statusCode {
@@ -835,7 +835,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 							if disableCooling {
 								state.NextRetryAfter = time.Time{}
 							} else {
-								next := now.Add(30 * time.Minute)
+								next := now.Add(10 * time.Minute)
 								state.NextRetryAfter = next
 							}
 						case 404:
@@ -2078,7 +2078,7 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 		if disableCooling {
 			auth.NextRetryAfter = time.Time{}
 		} else {
-			auth.NextRetryAfter = now.Add(30 * time.Minute)
+			auth.NextRetryAfter = now.Add(10 * time.Minute)
 		}
 	} else {
 		switch statusCode {
@@ -2087,14 +2087,14 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 			if disableCooling {
 				auth.NextRetryAfter = time.Time{}
 			} else {
-				auth.NextRetryAfter = now.Add(30 * time.Minute)
+				auth.NextRetryAfter = now.Add(10 * time.Minute)
 			}
 		case 402, 403:
 			auth.StatusMessage = "payment_required"
 			if disableCooling {
 				auth.NextRetryAfter = time.Time{}
 			} else {
-				auth.NextRetryAfter = now.Add(30 * time.Minute)
+				auth.NextRetryAfter = now.Add(10 * time.Minute)
 			}
 		case 404:
 			auth.StatusMessage = "not_found"

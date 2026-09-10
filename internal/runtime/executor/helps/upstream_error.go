@@ -195,7 +195,7 @@ func detectPlainTextKeyAbuse(body []byte) int {
 		strings.Contains(lower, "invalid_api_key") ||
 		strings.Contains(lower, "api key is invalid") ||
 		strings.Contains(lower, "incorrect api key"):
-		return http.StatusUnauthorized
+		return http.StatusForbidden
 	}
 	return 0
 }

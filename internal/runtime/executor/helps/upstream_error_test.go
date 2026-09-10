@@ -245,8 +245,8 @@ func TestDetectUpstreamErrorBody_200InvalidAPIKeyPlaintext(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for 200 body with invalid api key phrase")
 	}
-	if err.Code != http.StatusUnauthorized {
-		t.Fatalf("expected status 401, got %d", err.Code)
+	if err.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", err.Code)
 	}
 }
 

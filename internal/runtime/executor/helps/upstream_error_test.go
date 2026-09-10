@@ -172,3 +172,110 @@ func TestDetectUpstreamErrorBody_HTMLWhitespacePrefix(t *testing.T) {
 		t.Fatalf("expected status 502, got %d", err.Code)
 	}
 }
+
+func TestDetectUpstreamErrorBody_401NonJSON(t *testing.T) {
+	body := []byte("Unauthorized")
+	err := DetectUpstreamErrorBody(http.StatusUnauthorized, body)
+	if err == nil {
+		t.Fatal("expected error for non-JSON 401 body")
+	}
+	if err.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", err.Code)
+	}
+}
+
+func TestDetectUpstreamErrorBody_403NonJSON(t *testing.T) {
+	body := []byte("Forbidden")
+	err := DetectUpstreamErrorBody(http.StatusForbidden, body)
+	if err == nil {
+		t.Fatal("expected error for non-JSON 403 body")
+	}
+	if err.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", err.Code)
+	}
+}
+
+func TestDetectUpstreamErrorBody_200KeyDisabledPlaintext(t *testing.T) {
+	body := []byte("Error: API key has been disabled")
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err == nil {
+		t.Fatal("expected error for 200 body with key-disabled phrase")
+	}
+	if err.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", err.Code)
+	}
+}
+
+func TestDetectUpstreamErrorBody_200UnauthorizedResalePlaintext(t *testing.T) {
+	body := []byte("This key has been suspended due to unauthorized resale.")
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err == nil {
+		t.Fatal("expected error for 200 body with unauthorized resale phrase")
+	}
+	if err.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", err.Code)
+	}
+}
+
+func TestDetectUpstreamErrorBody_200ToSViolationPlaintext(t *testing.T) {
+	body := []byte("Your account has been disabled for violating the terms of service.")
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err == nil {
+		t.Fatal("expected error for 200 body with ToS violation phrase")
+	}
+	if err.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", err.Code)
+	}
+}
+
+func TestDetectUpstreamErrorBody_200AccountSuspendedPlaintext(t *testing.T) {
+	body := []byte("account has been suspended")
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err == nil {
+		t.Fatal("expected error for 200 body with account suspended phrase")
+	}
+	if err.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", err.Code)
+	}
+}
+
+func TestDetectUpstreamErrorBody_200InvalidAPIKeyPlaintext(t *testing.T) {
+	body := []byte("Invalid API key provided.")
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err == nil {
+		t.Fatal("expected error for 200 body with invalid api key phrase")
+	}
+	if err.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", err.Code)
+	}
+}
+
+func TestDetectUpstreamErrorBody_200NormalPlaintextNoMatch(t *testing.T) {
+	body := []byte("Hello world, this is a normal plain-text response.")
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err != nil {
+		t.Fatalf("expected nil for benign plain-text 200 body, got %v", err)
+	}
+}
+
+func TestDetectUpstreamErrorBody_200KeyDisabledInJSONMessage(t *testing.T) {
+	body := []byte(`{"error":{"message":"API key has been disabled","type":"invalid_request_error"}}`)
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err == nil {
+		t.Fatal("expected error for JSON body with key-disabled message")
+	}
+	if err.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", err.Code)
+	}
+}
+
+func TestDetectUpstreamErrorBody_200ToSViolationInJSONMessage(t *testing.T) {
+	body := []byte(`{"error":{"message":"Your key was disabled for violating the terms of service.","type":"policy_violation"}}`)
+	err := DetectUpstreamErrorBody(http.StatusOK, body)
+	if err == nil {
+		t.Fatal("expected error for JSON body with ToS violation message")
+	}
+	if err.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d", err.Code)
+	}
+}

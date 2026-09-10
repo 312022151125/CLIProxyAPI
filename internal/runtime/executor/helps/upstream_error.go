@@ -75,6 +75,21 @@ func DetectUpstreamErrorBody(httpStatus int, body []byte) *UpstreamBodyError {
 		}
 	}
 	if firstByte != '{' && firstByte != '[' {
+		// Non-JSON body on 401/403 — treat as auth failure so credential
+		// rotation kicks in (e.g. upstream returns a plain-text "Unauthorized").
+		if httpStatus == http.StatusUnauthorized {
+			return &UpstreamBodyError{Code: http.StatusUnauthorized, Message: string(body)}
+		}
+		if httpStatus == http.StatusForbidden {
+			return &UpstreamBodyError{Code: http.StatusForbidden, Message: string(body)}
+		}
+		// Plain-text body on 2xx containing key-abuse / ToS-violation phrases
+		// — upstream confirmed the key is dead even though HTTP status is 200.
+		if httpStatus >= 200 && httpStatus < 300 {
+			if code := detectPlainTextKeyAbuse(body); code != 0 {
+				return &UpstreamBodyError{Code: code, Message: string(body)}
+			}
+		}
 		return nil
 	}
 	errField := gjson.GetBytes(body, "error")
@@ -129,6 +144,17 @@ func inferUpstreamErrorStatus(httpStatus int, typeOrCode string, message string)
 		strings.Contains(lower, "usage_limit") ||
 		strings.Contains(lower, "capacity"):
 		return http.StatusTooManyRequests
+	case strings.Contains(lower, "api key has been disabled") ||
+		strings.Contains(lower, "key has been disabled") ||
+		strings.Contains(lower, "unauthorized resale") ||
+		strings.Contains(lower, "violating the terms of service") ||
+		strings.Contains(lower, "violates our terms") ||
+		strings.Contains(lower, "terms of service violation") ||
+		strings.Contains(lower, "account has been suspended") ||
+		strings.Contains(lower, "account suspended") ||
+		strings.Contains(lower, "key is disabled") ||
+		strings.Contains(lower, "key disabled"):
+		return http.StatusForbidden
 	case strings.Contains(lower, "unauthorized") ||
 		strings.Contains(lower, "invalid_api_key") ||
 		strings.Contains(lower, "authentication"):
@@ -144,4 +170,32 @@ func inferUpstreamErrorStatus(httpStatus int, typeOrCode string, message string)
 		return http.StatusBadGateway
 	}
 	return httpStatus
+}
+
+// detectPlainTextKeyAbuse scans a non-JSON response body for well-known
+// phrases that upstream providers embed in plain-text or minimal-HTML
+// error responses to indicate that an API key has been revoked, disabled,
+// or is being used in violation of their terms of service. Returns the
+// appropriate HTTP status code (401 or 403), or 0 if no phrase matched.
+func detectPlainTextKeyAbuse(body []byte) int {
+	lower := strings.ToLower(string(body[:min(len(body), 1024)]))
+	switch {
+	case strings.Contains(lower, "api key has been disabled") ||
+		strings.Contains(lower, "key has been disabled") ||
+		strings.Contains(lower, "key is disabled") ||
+		strings.Contains(lower, "key disabled") ||
+		strings.Contains(lower, "unauthorized resale") ||
+		strings.Contains(lower, "violating the terms of service") ||
+		strings.Contains(lower, "violates our terms") ||
+		strings.Contains(lower, "terms of service violation") ||
+		strings.Contains(lower, "account has been suspended") ||
+		strings.Contains(lower, "account suspended"):
+		return http.StatusForbidden
+	case strings.Contains(lower, "invalid api key") ||
+		strings.Contains(lower, "invalid_api_key") ||
+		strings.Contains(lower, "api key is invalid") ||
+		strings.Contains(lower, "incorrect api key"):
+		return http.StatusUnauthorized
+	}
+	return 0
 }

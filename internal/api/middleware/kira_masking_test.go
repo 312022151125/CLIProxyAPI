@@ -52,77 +52,35 @@ func TestMaskKira(t *testing.T) {
 	}
 }
 
-func TestIsGeminiModel(t *testing.T) {
-	tests := []struct {
-		model string
-		want  bool
-	}{
-		{"gemini-2.5-flash", true},
-		{"gemini-pro", true},
-		{"GEMINI-1.5-PRO", true},
-		{"google/gemini-2.0", true},
-		{"gpt-4o", false},
-		{"claude-3-5-sonnet", false},
-		{"deepseek-chat", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		if got := isGeminiModel(tt.model); got != tt.want {
-			t.Errorf("isGeminiModel(%q) = %v, want %v", tt.model, got, tt.want)
-		}
-	}
-}
+func TestKiraMaskingAllModels(t *testing.T) {
+	models := []string{"gemini-2.5-flash", "gpt-4o", "claude-3-5-sonnet", "deepseek-chat", ""}
+	for _, model := range models {
+		t.Run("model="+model, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			r := gin.New()
+			r.Use(KiraMaskingMiddleware())
+			r.POST("/v1/chat/completions", func(c *gin.Context) {
+				c.Header("Content-Type", "application/json")
+				c.Header("Content-Length", "1000")
+				c.Status(http.StatusOK)
+				c.Writer.WriteString(`{"content": "powered by kiraai.vn and Kira AI"}`)
+			})
 
-func TestKiraMaskingGeminiModelNonStreaming(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.Use(KiraMaskingMiddleware())
-	r.POST("/v1/chat/completions", func(c *gin.Context) {
-		c.Header("Content-Type", "application/json")
-		c.Header("Content-Length", "1000")
-		c.Status(http.StatusOK)
-		c.Writer.WriteString(`{"content": "powered by kiraai.vn and Kira AI"}`)
-	})
+			reqBody := `{"model": "` + model + `", "messages": [{"role": "user", "content": "hi"}]}`
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
 
-	reqBody := `{"model": "gemini-2.5-flash", "messages": [{"role": "user", "content": "hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-	if got, want := rec.Body.String(), `{"content": "powered by llmgate.app and Model AI"}`; got != want {
-		t.Errorf("body = %q, want %q", got, want)
-	}
-	// Content-Length must be stripped for masked responses
-	if got := rec.Header().Get("Content-Length"); got != "" {
-		t.Errorf("Content-Length = %q, want stripped", got)
-	}
-}
-
-func TestKiraMaskingNonGeminiModelUntouched(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.Use(KiraMaskingMiddleware())
-	r.POST("/v1/chat/completions", func(c *gin.Context) {
-		c.Header("Content-Type", "application/json")
-		c.Header("Content-Length", "50")
-		c.Status(http.StatusOK)
-		c.Writer.WriteString(`{"content": "powered by kiraai.vn and Kira AI"}`)
-	})
-
-	reqBody := `{"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-	// Non-Gemini models must NOT be masked
-	if got, want := rec.Body.String(), `{"content": "powered by kiraai.vn and Kira AI"}`; got != want {
-		t.Errorf("body = %q, want %q", got, want)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+			}
+			if got, want := rec.Body.String(), `{"content": "powered by llmgate.app and Model AI"}`; got != want {
+				t.Errorf("body = %q, want %q", got, want)
+			}
+			if got := rec.Header().Get("Content-Length"); got != "" {
+				t.Errorf("Content-Length = %q, want stripped", got)
+			}
+		})
 	}
 }
 
@@ -144,7 +102,7 @@ func TestKiraMaskingStreaming(t *testing.T) {
 		}
 	})
 
-	reqBody := `{"model": "gemini-2.5-flash", "stream": true}`
+	reqBody := `{"model": "gpt-4o", "stream": true}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(reqBody))
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -156,22 +114,5 @@ func TestKiraMaskingStreaming(t *testing.T) {
 	want := `data: {"delta": "llmgate.app is Model AI"}` + "\n\n" + `data: [DONE]` + "\n\n"
 	if got := string(body); got != want {
 		t.Errorf("stream body = %q, want %q", got, want)
-	}
-}
-
-func TestKiraMaskingPathGemini(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.Use(KiraMaskingMiddleware())
-	r.GET("/v1/models/gemini-2.5-flash", func(c *gin.Context) {
-		c.Writer.WriteHeader(http.StatusOK)
-		c.Writer.WriteString("kiraai.vn host for Kira AI")
-	})
-
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/models/gemini-2.5-flash", nil))
-
-	if got, want := rec.Body.String(), "llmgate.app host for Model AI"; got != want {
-		t.Errorf("body = %q, want %q", got, want)
 	}
 }

@@ -46,7 +46,7 @@ func assertUnsupportedImagesModelResponse(t *testing.T, resp *httptest.ResponseR
 	}
 
 	message := gjson.GetBytes(resp.Body.Bytes(), "error.message").String()
-	expectedMessage := "Model " + model + " is not supported on " + imagesGenerationsPath + ", " + imagesEditsPath + ", or " + imagesVariationsPath + ". Use " + gptImage15Model + ", " + defaultImagesToolModel + ", " + defaultXAIImagesModel + ", " + xaiImagesQualityModel + ", " + xaiImages20Model + ", or a configured openai-compatibility image model."
+	expectedMessage := "Model " + model + " is not supported on " + imagesGenerationsPath + " or " + imagesEditsPath + ". Use " + gptImage15Model + ", " + defaultImagesToolModel + ", " + gptImage25FlareModel + ", " + gptImage25SunburstModel + ", " + gptImage25Model + ", " + defaultXAIImagesModel + ", " + xaiImagesQualityModel + ", " + xaiImages20Model + ", or a configured openai-compatibility image model."
 	if message != expectedMessage {
 		t.Fatalf("error message = %q, want %q", message, expectedMessage)
 	}
@@ -56,7 +56,24 @@ func assertUnsupportedImagesModelResponse(t *testing.T, resp *httptest.ResponseR
 }
 
 func TestImagesModelValidationAllowsGPTImageAndXAIModels(t *testing.T) {
-	for _, model := range []string{"gpt-image-1.5", "codex/gpt-image-1.5", "gpt-image-2", "codex/gpt-image-2", "grok-imagine-image", "xai/grok-imagine-image", "grok-imagine-image-quality", "xai/grok-imagine-image-quality", "grok-imagine-image-2.0", "xai/grok-imagine-image-2.0"} {
+	for _, model := range []string{
+		"gpt-image-1.5",
+		"codex/gpt-image-1.5",
+		"gpt-image-2",
+		"codex/gpt-image-2",
+		"gpt-image-2.5-flare",
+		"codex/gpt-image-2.5-flare",
+		"gpt-image-2.5-sunburst",
+		"codex/gpt-image-2.5-sunburst",
+		"gpt-image-2.5",
+		"codex/gpt-image-2.5",
+		"grok-imagine-image",
+		"xai/grok-imagine-image",
+		"grok-imagine-image-quality",
+		"xai/grok-imagine-image-quality",
+		"grok-imagine-image-2.0",
+		"xai/grok-imagine-image-2.0",
+	} {
 		if !isSupportedImagesModel(model) {
 			t.Fatalf("expected %s to be supported", model)
 		}
@@ -80,26 +97,11 @@ func TestImagesModelValidationAllowsOpenAICompatImageModels(t *testing.T) {
 		modelRegistry.UnregisterClient(clientID)
 	})
 
-	// Both image-flagged and plain openai-compatibility models are now accepted on
-	// /v1/images/* by default — image: true is no longer required.
 	if !isSupportedImagesModel("compat-image-model") {
-		t.Fatal("expected explicit-image openai-compatibility model to be supported")
+		t.Fatal("expected configured openai-compatibility image model to be supported")
 	}
-	if !isSupportedImagesModel("compat-chat-model") {
-		t.Fatal("expected plain openai-compatibility model to be supported on /v1/images/* by default")
-	}
-}
-
-func TestImagesModelValidationAllowsGeminiImageModels(t *testing.T) {
-	for _, model := range []string{"gemini-3.1-flash-image", "antigravity/gemini-3.1-flash-image", "gemini-2.5-flash-image-preview", "imagen-3"} {
-		if !isSupportedImagesModel(model) {
-			t.Fatalf("expected %s to be supported", model)
-		}
-	}
-	for _, model := range []string{"gemini-2.5-flash", "gemini-2.5-pro"} {
-		if isSupportedImagesModel(model) {
-			t.Fatalf("expected %s to be rejected (no image in name)", model)
-		}
+	if isSupportedImagesModel("compat-chat-model") {
+		t.Fatal("expected non-image openai-compatibility model to be rejected")
 	}
 }
 
@@ -108,53 +110,6 @@ func TestCanonicalXAIImagesModelPreservesImage20(t *testing.T) {
 		if got := canonicalXAIImagesModel(model); got != xaiImages20Model {
 			t.Fatalf("canonicalXAIImagesModel(%q) = %q, want %s", model, got, xaiImages20Model)
 		}
-	}
-}
-
-func TestBuildGeminiChatImagesRequest(t *testing.T) {
-	req := buildGeminiChatImagesRequest("a red apple", "antigravity/gemini-3.1-flash-image")
-
-	if got := gjson.GetBytes(req, "model").String(); got != "antigravity/gemini-3.1-flash-image" {
-		t.Fatalf("model = %q, want antigravity/gemini-3.1-flash-image", got)
-	}
-	if got := gjson.GetBytes(req, "messages.0.role").String(); got != "user" {
-		t.Fatalf("messages.0.role = %q, want user", got)
-	}
-	if got := gjson.GetBytes(req, "messages.0.content").String(); got != "a red apple" {
-		t.Fatalf("messages.0.content = %q, want a red apple", got)
-	}
-	if got := gjson.GetBytes(req, "modalities.0").String(); got != "image" {
-		t.Fatalf("modalities.0 = %q, want image", got)
-	}
-}
-
-func TestExtractImagesFromChatCompletions(t *testing.T) {
-	resp := []byte(`{"created":1700000000,"choices":[{"message":{"role":"assistant","images":[{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,/9j/ABC="}}]}}]}`)
-
-	results, createdAt, err := extractImagesFromChatCompletions(resp)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if createdAt != 1700000000 {
-		t.Fatalf("createdAt = %d, want 1700000000", createdAt)
-	}
-	if len(results) != 1 {
-		t.Fatalf("len(results) = %d, want 1", len(results))
-	}
-	if results[0].Result != "/9j/ABC=" {
-		t.Fatalf("result = %q, want /9j/ABC=", results[0].Result)
-	}
-	if results[0].OutputFormat != "jpeg" {
-		t.Fatalf("output_format = %q, want jpeg", results[0].OutputFormat)
-	}
-}
-
-func TestExtractImagesFromChatCompletionsNoImages(t *testing.T) {
-	resp := []byte(`{"created":1700000000,"choices":[{"message":{"role":"assistant","content":"hello"}}]}`)
-
-	_, _, err := extractImagesFromChatCompletions(resp)
-	if err == nil {
-		t.Fatal("expected error for response with no images")
 	}
 }
 
@@ -559,99 +514,4 @@ func TestSSEFrameAccumulatorKeepsMultipleFramesDistinct(t *testing.T) {
 	if string(frames[0]) != first || string(frames[1]) != second {
 		t.Fatalf("frames were overwritten during buffer compaction: %q", frames)
 	}
-}
-
-// buildVariationsMultipartBody creates a multipart body with a minimal PNG image.
-// Used for variation tests that don't need a real image to pass validation.
-func buildVariationsMultipartBody(t *testing.T, model string) (*bytes.Buffer, string) {
-	t.Helper()
-	return buildVariationsMultipartBodyPNG(t, model)
-}
-
-func TestImagesVariationsRejectsUnsupportedModel(t *testing.T) {
-	handler := &OpenAIAPIHandler{}
-	body, contentType := buildVariationsMultipartBody(t, "gpt-5.4-mini")
-	resp := performImagesEndpointRequest(t, imagesVariationsPath, contentType, body, handler.ImagesVariations)
-	assertUnsupportedImagesModelResponse(t, resp, "gpt-5.4-mini")
-}
-
-func TestImagesVariationsRejectsMissingImage(t *testing.T) {
-	handler := &OpenAIAPIHandler{}
-	// Send form with only model field, no image.
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	_ = writer.WriteField("model", defaultImagesToolModel)
-	_ = writer.Close()
-	resp := performImagesEndpointRequest(t, imagesVariationsPath, writer.FormDataContentType(), &body, handler.ImagesVariations)
-	if resp.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d: %s", resp.Code, http.StatusBadRequest, resp.Body.String())
-	}
-	msg := gjson.GetBytes(resp.Body.Bytes(), "error.message").String()
-	if !strings.Contains(msg, "image is required") {
-		t.Fatalf("error message = %q, want to contain 'image is required'", msg)
-	}
-}
-
-func TestImagesVariations_DisableImageGeneration_Returns404(t *testing.T) {
-	base := handlers.NewBaseAPIHandlers(&sdkconfig.SDKConfig{DisableImageGeneration: internalconfig.DisableImageGenerationAll}, nil)
-	handler := NewOpenAIAPIHandler(base)
-
-	body, contentType := buildVariationsMultipartBody(t, "")
-	resp := performImagesEndpointRequest(t, imagesVariationsPath, contentType, body, handler.ImagesVariations)
-	if resp.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d: %s", resp.Code, http.StatusNotFound, resp.Body.String())
-	}
-}
-
-// TestImagesVariations_OpenAICompatModelIsSupported verifies that a model registered
-// with Type=OpenAIImageModelType is accepted by the variations handler at the
-// validation layer (i.e. not rejected as "unsupported model").
-func TestImagesVariations_OpenAICompatModelIsSupported(t *testing.T) {
-	const compatModel = "compat-image-model-var"
-	reg := registry.GetGlobalRegistry()
-	reg.RegisterClient("test-variations-compat-2", "openai-compatibility", []*registry.ModelInfo{
-		{ID: compatModel, Type: registry.OpenAIImageModelType},
-	})
-	t.Cleanup(func() { reg.UnregisterClient("test-variations-compat-2") })
-
-	if !isOpenAICompatImagesModel(compatModel) {
-		t.Fatalf("expected %s to be detected as openai-compat image model", compatModel)
-	}
-	if !isSupportedImagesModel(compatModel) {
-		t.Fatalf("expected %s to pass isSupportedImagesModel", compatModel)
-	}
-}
-
-// buildVariationsMultipartBodyPNG builds a real multipart body with a 1×1 PNG.
-func buildVariationsMultipartBodyPNG(t *testing.T, model string) (*bytes.Buffer, string) {
-	t.Helper()
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	if model != "" {
-		_ = writer.WriteField("model", model)
-	}
-	h := make(textproto.MIMEHeader)
-	h.Set("Content-Disposition", `form-data; name="image"; filename="test.png"`)
-	h.Set("Content-Type", "image/png")
-	fw, err := writer.CreatePart(h)
-	if err != nil {
-		t.Fatalf("create image part: %v", err)
-	}
-	// minimal valid 1×1 PNG bytes (67 bytes)
-	pngBytes := []byte{
-		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
-		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk length+type
-		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1×1
-		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, // bit depth 8, RGB
-		0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, // IDAT chunk
-		0x54, 0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00,
-		0x00, 0x00, 0x02, 0x00, 0x01, 0xE2, 0x21, 0xBC,
-		0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, // IEND chunk
-		0x44, 0xAE, 0x42, 0x60, 0x82,
-	}
-	if _, err := fw.Write(pngBytes); err != nil {
-		t.Fatalf("write image: %v", err)
-	}
-	_ = writer.Close()
-	return &body, writer.FormDataContentType()
 }

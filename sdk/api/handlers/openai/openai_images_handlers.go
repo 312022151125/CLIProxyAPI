@@ -29,6 +29,9 @@ const (
 	defaultImagesMainModel      = "gpt-5.4-mini"
 	gptImage15Model             = "gpt-image-1.5"
 	defaultImagesToolModel      = "gpt-image-2"
+	gptImage25FlareModel        = "gpt-image-2.5-flare"
+	gptImage25SunburstModel     = "gpt-image-2.5-sunburst"
+	gptImage25Model             = "gpt-image-2.5"
 	defaultXAIImagesModel       = "grok-imagine-image"
 	xaiImagesQualityModel       = "grok-imagine-image-quality"
 	xaiImages20Model            = "grok-imagine-image-2.0"
@@ -37,7 +40,6 @@ const (
 	xaiImagesDefaultResolution  = "1k"
 	imagesGenerationsPath       = "/v1/images/generations"
 	imagesEditsPath             = "/v1/images/edits"
-	imagesVariationsPath        = "/v1/images/variations"
 )
 
 type imageCallResult struct {
@@ -231,21 +233,20 @@ func isXAIImagesModel(model string) bool {
 	return prefix == "" || prefix == "xai" || prefix == "x-ai" || prefix == "grok"
 }
 
-func isGeminiChatImageModel(model string) bool {
-	base := strings.ToLower(strings.TrimSpace(imagesModelBase(model)))
-	return strings.Contains(base, "flash-image") || strings.Contains(base, "imagen")
-}
-
 func isSupportedImagesModel(model string) bool {
 	if isCodexImagesToolModel(model) {
 		return true
 	}
-	return isXAIImagesModel(model) || isOpenAICompatImagesModel(model) || isGeminiChatImageModel(model)
+	return isXAIImagesModel(model) || isOpenAICompatImagesModel(model)
 }
 
 func isCodexImagesToolModel(model string) bool {
-	baseModel := imagesModelBase(model)
-	return baseModel == gptImage15Model || baseModel == defaultImagesToolModel
+	switch imagesModelBase(model) {
+	case gptImage15Model, defaultImagesToolModel, gptImage25FlareModel, gptImage25SunburstModel, gptImage25Model:
+		return true
+	default:
+		return false
+	}
 }
 
 func isOpenAICompatImagesModel(model string) bool {
@@ -254,14 +255,7 @@ func isOpenAICompatImagesModel(model string) bool {
 		return false
 	}
 	info := registry.LookupModelInfo(model)
-	if info == nil {
-		return false
-	}
-	// Accept any openai-compatibility model unless images are explicitly disabled.
-	if info.ImageDisabled {
-		return false
-	}
-	return info.Type == registry.OpenAIImageModelType || info.Type == "openai-compatibility"
+	return info != nil && info.Type == registry.OpenAIImageModelType
 }
 
 func rejectUnsupportedImagesModel(c *gin.Context, model string) bool {
@@ -271,7 +265,7 @@ func rejectUnsupportedImagesModel(c *gin.Context, model string) bool {
 
 	c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
 		Error: handlers.ErrorDetail{
-			Message: fmt.Sprintf("Model %s is not supported on %s, %s, or %s. Use %s, %s, %s, %s, %s, or a configured openai-compatibility image model.", model, imagesGenerationsPath, imagesEditsPath, imagesVariationsPath, gptImage15Model, defaultImagesToolModel, defaultXAIImagesModel, xaiImagesQualityModel, xaiImages20Model),
+			Message: fmt.Sprintf("Model %s is not supported on %s or %s. Use %s, %s, %s, %s, %s, %s, %s, %s, or a configured openai-compatibility image model.", model, imagesGenerationsPath, imagesEditsPath, gptImage15Model, defaultImagesToolModel, gptImage25FlareModel, gptImage25SunburstModel, gptImage25Model, defaultXAIImagesModel, xaiImagesQualityModel, xaiImages20Model),
 			Type:    "invalid_request_error",
 		},
 	})
@@ -675,11 +669,6 @@ func (h *OpenAIAPIHandler) ImagesGenerations(c *gin.Context) {
 		h.handleOpenAICompatImages(c, compatReq, imageModel, responseFormat, "image_generation", stream)
 		return
 	}
-	if isGeminiChatImageModel(imageModel) {
-		chatReq := buildGeminiChatImagesRequest(prompt, imageModel)
-		h.collectGeminiChatImages(c, chatReq, imageModel, responseFormat)
-		return
-	}
 
 	tool := []byte(`{"type":"image_generation","action":"generate"}`)
 	tool, _ = sjson.SetBytes(tool, "model", imageModel)
@@ -1041,212 +1030,6 @@ func (h *OpenAIAPIHandler) imagesEditsFromJSON(c *gin.Context) {
 		return
 	}
 	h.collectImagesFromResponses(c, responsesReq, responseFormat)
-}
-
-// ImagesVariations handles POST /v1/images/variations.
-//
-// The OpenAI Images variations endpoint accepts a multipart/form-data request
-// containing an uploaded image and produces alternative versions of it.
-// Unlike edits, no prompt is required.
-//
-// For openai-compatibility providers the raw multipart body is forwarded
-// verbatim to POST {base-url}/images/variations.
-// For xAI or codex providers the request is forwarded via the routed images path.
-func (h *OpenAIAPIHandler) ImagesVariations(c *gin.Context) {
-	if h != nil && h.BaseAPIHandler != nil && h.BaseAPIHandler.Cfg != nil && h.BaseAPIHandler.Cfg.DisableImageGeneration == internalconfig.DisableImageGenerationAll {
-		c.AbortWithStatus(http.StatusNotFound)
-		return
-	}
-
-	form, err := c.MultipartForm()
-	if err != nil {
-		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
-			Error: handlers.ErrorDetail{
-				Message: fmt.Sprintf("Invalid request: %v", err),
-				Type:    "invalid_request_error",
-			},
-		})
-		return
-	}
-
-	imageModel := strings.TrimSpace(c.PostForm("model"))
-	if imageModel == "" {
-		imageModel = defaultImagesToolModel
-	}
-	if rejectUnsupportedImagesModel(c, imageModel) {
-		return
-	}
-
-	var imageFiles []*multipart.FileHeader
-	if files := form.File["image[]"]; len(files) > 0 {
-		imageFiles = files
-	} else if files := form.File["image"]; len(files) > 0 {
-		imageFiles = files
-	}
-	if len(imageFiles) == 0 {
-		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
-			Error: handlers.ErrorDetail{
-				Message: "Invalid request: image is required",
-				Type:    "invalid_request_error",
-			},
-		})
-		return
-	}
-
-	responseFormat := strings.TrimSpace(c.PostForm("response_format"))
-	if responseFormat == "" {
-		responseFormat = "b64_json"
-	}
-	stream := parseBoolField(c.PostForm("stream"), false)
-
-	// openai-compatibility provider: forward the full multipart body to upstream /images/variations.
-	if isOpenAICompatImagesModel(imageModel) {
-		compatReq, contentType, errBuild := buildOpenAICompatImagesMultipartRequest(form, imageModel, stream)
-		if errBuild != nil {
-			c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
-				Error: handlers.ErrorDetail{
-					Message: fmt.Sprintf("Invalid request: %v", errBuild),
-					Type:    "invalid_request_error",
-				},
-			})
-			return
-		}
-		c.Request.Header.Set("Content-Type", contentType)
-		h.handleOpenAICompatImages(c, compatReq, imageModel, responseFormat, "image_variation", stream)
-		return
-	}
-
-	// codex / routed providers: forward the full multipart body.
-	if isCodexImagesToolModel(imageModel) {
-		imageReq, contentType, errBuild := buildOpenAICompatImagesMultipartRequest(form, imageModel, stream)
-		if errBuild != nil {
-			c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
-				Error: handlers.ErrorDetail{
-					Message: fmt.Sprintf("Invalid request: %v", errBuild),
-					Type:    "invalid_request_error",
-				},
-			})
-			return
-		}
-		c.Request.Header.Set("Content-Type", contentType)
-		h.handleRoutedImages(c, imageReq, imageModel, stream)
-		return
-	}
-
-	// xAI: convert the uploaded image to a data URL and call the generations endpoint.
-	// xAI does not have a native variations endpoint; use image-to-image edit instead.
-	if isXAIImagesModel(imageModel) {
-		images := make([]string, 0, len(imageFiles))
-		for _, fh := range imageFiles {
-			dataURL, errDataURL := multipartFileToDataURL(fh)
-			if errDataURL != nil {
-				c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
-					Error: handlers.ErrorDetail{
-						Message: fmt.Sprintf("Invalid request: %v", errDataURL),
-						Type:    "invalid_request_error",
-					},
-				})
-				return
-			}
-			images = append(images, dataURL)
-		}
-		aspectRatio := xaiImagesAspectRatioFromSize(c.PostForm("size"), "")
-		resolution := xaiImagesResolution(c.PostForm("resolution"), c.PostForm("size"), "")
-		n := parseIntField(c.PostForm("n"), 0)
-		// Use an empty prompt — xAI edit is used as a best-effort variation proxy.
-		xaiReq := buildXAIImagesEditRequest(imageModel, "", images, responseFormat, aspectRatio, resolution, n)
-		h.handleXAIImages(c, xaiReq, responseFormat, "image_variation", stream)
-		return
-	}
-
-	// Default (Codex/Responses-based providers): forward raw multipart body through image-edit tool.
-	imageReq, contentType, errBuild := buildOpenAICompatImagesMultipartRequest(form, imageModel, stream)
-	if errBuild != nil {
-		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
-			Error: handlers.ErrorDetail{
-				Message: fmt.Sprintf("Invalid request: %v", errBuild),
-				Type:    "invalid_request_error",
-			},
-		})
-		return
-	}
-	c.Request.Header.Set("Content-Type", contentType)
-	h.handleRoutedImages(c, imageReq, imageModel, stream)
-}
-
-func buildGeminiChatImagesRequest(prompt, model string) []byte {
-	req := []byte(`{"messages":[{"role":"user","content":""}],"modalities":["image","text"]}`)
-	req, _ = sjson.SetBytes(req, "model", strings.TrimSpace(model))
-	req, _ = sjson.SetBytes(req, "messages.0.content", strings.TrimSpace(prompt))
-	return req
-}
-
-func extractImagesFromChatCompletions(resp []byte) ([]imageCallResult, int64, error) {
-	createdAt := gjson.GetBytes(resp, "created").Int()
-	if createdAt <= 0 {
-		createdAt = time.Now().Unix()
-	}
-	imagesArr := gjson.GetBytes(resp, "choices.0.message.images")
-	if !imagesArr.IsArray() || len(imagesArr.Array()) == 0 {
-		return nil, createdAt, fmt.Errorf("upstream did not return image output")
-	}
-	var results []imageCallResult
-	for _, img := range imagesArr.Array() {
-		dataURI := strings.TrimSpace(img.Get("image_url.url").String())
-		if dataURI == "" {
-			continue
-		}
-		entry := imageCallResult{}
-		if idx := strings.Index(dataURI, ";base64,"); idx >= 0 {
-			mimeType := strings.TrimPrefix(dataURI[:idx], "data:")
-			entry.OutputFormat = strings.TrimPrefix(mimeType, "image/")
-			entry.Result = dataURI[idx+len(";base64,"):]
-		} else {
-			entry.Result = dataURI
-		}
-		results = append(results, entry)
-	}
-	if len(results) == 0 {
-		return nil, createdAt, fmt.Errorf("upstream did not return image output")
-	}
-	return results, createdAt, nil
-}
-
-func (h *OpenAIAPIHandler) collectGeminiChatImages(c *gin.Context, chatReq []byte, model, responseFormat string) {
-	c.Header("Content-Type", "application/json")
-	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
-	cliCtx = handlers.WithDisallowFreeAuth(cliCtx)
-	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
-
-	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, "openai", model, chatReq, "")
-	stopKeepAlive()
-	if errMsg != nil {
-		h.WriteErrorResponse(c, errMsg)
-		if errMsg.Error != nil {
-			cliCancel(errMsg.Error)
-		} else {
-			cliCancel(nil)
-		}
-		return
-	}
-
-	results, createdAt, err := extractImagesFromChatCompletions(resp)
-	if err != nil {
-		h.WriteErrorResponse(c, &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: err})
-		cliCancel(err)
-		return
-	}
-
-	out, err := buildImagesAPIResponse(results, createdAt, nil, results[0], responseFormat)
-	if err != nil {
-		h.WriteErrorResponse(c, &interfaces.ErrorMessage{StatusCode: http.StatusInternalServerError, Error: err})
-		cliCancel(err)
-		return
-	}
-
-	handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
-	_, _ = c.Writer.Write(out)
-	cliCancel(nil)
 }
 
 func buildImagesResponsesRequest(prompt string, images []string, toolJSON []byte) []byte {

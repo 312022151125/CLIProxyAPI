@@ -1154,8 +1154,8 @@ func TestManager_MarkResult_TransientErrorCooldownDoesNotDisableAuthErrors(t *te
 		t.Fatal("expected auth error cooldown to remain enabled")
 	}
 	diff := time.Until(state.NextRetryAfter)
-	if diff < 29*time.Minute || diff > 31*time.Minute {
-		t.Fatalf("expected auth error cooldown to be ~30 minutes, got %v", diff)
+	if diff < 9*time.Minute || diff > 11*time.Minute {
+		t.Fatalf("expected auth error cooldown to be ~10 minutes, got %v", diff)
 	}
 }
 
@@ -1689,8 +1689,8 @@ func TestManager_DeepSeekInsufficientBalanceRotatesCredentialAndRebindsSession(t
 	if !state.Unavailable {
 		t.Fatal("expected the depleted credential to be unavailable for the model")
 	}
-	if state.NextRetryAfter.Before(beforeExecute.Add(29 * time.Minute)) {
-		t.Fatalf("cooldown expires at %v, want approximately 30 minutes", state.NextRetryAfter)
+	if state.NextRetryAfter.Before(beforeExecute.Add(9 * time.Minute)) {
+		t.Fatalf("cooldown expires at %v, want approximately 10 minutes", state.NextRetryAfter)
 	}
 }
 

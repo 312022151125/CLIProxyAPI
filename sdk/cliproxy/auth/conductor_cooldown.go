@@ -2029,6 +2029,11 @@ func isRequestInvalidError(err error) bool {
 	if err == nil {
 		return false
 	}
+	// ponytail: explicit sentinel first so wrapped context-limit errors bypass
+	// rotation/cooling/backoff even when status/body are absent; ONLY this class bypasses.
+	if errors.Is(err, ErrContextWindowExceeded) {
+		return true
+	}
 	if isUpstreamTimeoutError(err) {
 		return false
 	}

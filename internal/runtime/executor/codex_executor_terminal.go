@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -298,15 +299,22 @@ func codexTerminalTopLevelErrorBody(eventData []byte) []byte {
 	}
 	return body
 }
-
 func codexTerminalErrorIsContextLength(body []byte) bool {
 	errorCode := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "error.code").String()))
 	message := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "error.message").String()))
-	return errorCode == "context_length_exceeded" ||
+	if errorCode == "context_length_exceeded" ||
 		errorCode == "context_too_large" ||
 		strings.Contains(message, "context window") ||
 		strings.Contains(message, "context length") ||
-		strings.Contains(message, "too many tokens")
+		strings.Contains(message, "too many tokens") {
+		return true
+	}
+	// ponytail: strict superset only (e.g. model_context_window_exceeded code); never narrows legacy matches.
+	return cliproxyauth.IsContextWindowExceeded(0,
+		gjson.GetBytes(body, "error.code").String(),
+		gjson.GetBytes(body, "error.type").String(),
+		gjson.GetBytes(body, "error.message").String(),
+		string(body))
 }
 
 func newCodexStatusErr(statusCode int, body []byte) statusErr {
@@ -320,12 +328,35 @@ func newCodexStatusErrWithCooling(statusCode int, body []byte, modelLevelCooling
 	if isCodexModelCapacityError(body) || isUsageLimit {
 		errCode = http.StatusTooManyRequests
 	}
+	// ponytail: detect on the pre-classification body so upstream codes survive; Error() text stays classified.
+	ctxWindowErr := codexContextWindowExceeded(statusCode, body)
 	body = classifyCodexStatusError(errCode, body)
-	err := statusErr{code: errCode, msg: string(body), credentialScoped: credentialScoped}
+	err := statusErr{code: errCode, msg: string(body), credentialScoped: credentialScoped, ctxWindowErr: ctxWindowErr}
 	if retryAfter := parseCodexRetryAfter(errCode, body, time.Now()); retryAfter != nil {
 		err.retryAfter = retryAfter
 	}
 	return err
+}
+
+// codexContextWindowExceeded normalizes a Codex error body to structured
+// context-limit metadata, or nil when the body is not a context failure.
+func codexContextWindowExceeded(statusCode int, body []byte) *cliproxyauth.ContextWindowExceededError {
+	message := strings.TrimSpace(gjson.GetBytes(body, "error.message").String())
+	if message == "" {
+		message = strings.TrimSpace(gjson.GetBytes(body, "message").String())
+	}
+	if !cliproxyauth.IsContextWindowExceeded(statusCode,
+		gjson.GetBytes(body, "error.code").String(),
+		gjson.GetBytes(body, "error.type").String(),
+		message, string(body)) {
+		return nil
+	}
+	raw := message
+	if raw == "" {
+		raw = strings.TrimSpace(string(body))
+	}
+	max, req, _ := cliproxyauth.ParseContextLimit(message)
+	return &cliproxyauth.ContextWindowExceededError{MaxContext: max, RequestTokens: req, Provider: "codex", Raw: raw}
 }
 
 func classifyCodexStatusError(statusCode int, body []byte) []byte {

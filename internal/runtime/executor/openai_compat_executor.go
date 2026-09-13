@@ -1444,6 +1444,9 @@ type statusErr struct {
 	msg              string
 	retryAfter       *time.Duration
 	credentialScoped bool
+	// ctxWindowErr is non-nil for normalized Codex context-limit failures.
+	// ponytail: pointer chain instead of a bool flag so errors.As exposes metadata with no extra API.
+	ctxWindowErr *cliproxyauth.ContextWindowExceededError
 }
 
 func (e statusErr) Error() string {
@@ -1455,6 +1458,16 @@ func (e statusErr) Error() string {
 func (e statusErr) StatusCode() int            { return e.code }
 func (e statusErr) RetryAfter() *time.Duration { return e.retryAfter }
 func (e statusErr) IsCredentialScoped() bool   { return e.credentialScoped }
+
+// Unwrap exposes the normalized context-limit cause, if any, so
+// errors.Is(err, cliproxyauth.ErrContextWindowExceeded) works on Codex
+// terminal/stream/compact/status errors without changing Error() output.
+func (e statusErr) Unwrap() error {
+	if e.ctxWindowErr != nil {
+		return e.ctxWindowErr
+	}
+	return nil
+}
 
 const openAICompatTPMFallbackRetryAfter = time.Minute
 

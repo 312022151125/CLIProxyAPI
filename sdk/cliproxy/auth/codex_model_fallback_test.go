@@ -131,29 +131,29 @@ func setupCodexFallbackManager(t *testing.T, clientID string, errs map[string]er
 }
 
 func TestCodexContextFallbackChains(t *testing.T) {
+	// Hook-first precedence: a Codex context failure diverts straight to the
+	// ai-provider failover hook. The legacy same-provider downgrade chain
+	// (sol -> 5.5 -> 5.4) no longer runs: downgrading within Codex cannot fit
+	// overflow input.
 	tests := []struct {
-		name      string
-		model     string
-		errors    map[string]error
-		wantCalls []string
+		name   string
+		model  string
+		errors map[string]error
 	}{
 		{
-			name:      "sol context errors on sol and 5.5 then success",
-			model:     "gpt-5.6-sol",
-			errors:    map[string]error{"gpt-5.6-sol": contextTooLargeError(), "gpt-5.5": contextTooLargeError()},
-			wantCalls: []string{"gpt-5.6-sol", "gpt-5.5", "gpt-5.4"},
+			name:   "sol context error diverts without downgrade",
+			model:  "gpt-5.6-sol",
+			errors: map[string]error{"gpt-5.6-sol": contextTooLargeError(), "gpt-5.5": contextTooLargeError()},
 		},
 		{
-			name:      "luna context error then success",
-			model:     "gpt-5.6-luna",
-			errors:    map[string]error{"gpt-5.6-luna": contextTooLargeError()},
-			wantCalls: []string{"gpt-5.6-luna", "gpt-5.4"},
+			name:   "luna context error diverts without downgrade",
+			model:  "gpt-5.6-luna",
+			errors: map[string]error{"gpt-5.6-luna": contextTooLargeError()},
 		},
 		{
-			name:      "terra context error then success",
-			model:     "gpt-5.6-terra",
-			errors:    map[string]error{"gpt-5.6-terra": contextTooLargeError()},
-			wantCalls: []string{"gpt-5.6-terra", "gpt-5.4"},
+			name:   "terra context error diverts without downgrade",
+			model:  "gpt-5.6-terra",
+			errors: map[string]error{"gpt-5.6-terra": contextTooLargeError()},
 		},
 	}
 
@@ -161,11 +161,14 @@ func TestCodexContextFallbackChains(t *testing.T) {
 		t.Run(tt.name+" non-stream", func(t *testing.T) {
 			m, exec := setupCodexFallbackManager(t, "codex-fallback-chain-"+tt.model, tt.errors)
 			_, err := m.Execute(context.Background(), []string{"codex"}, cliproxyexecutor.Request{Model: tt.model}, cliproxyexecutor.Options{Metadata: map[string]any{}})
-			if err != nil {
-				t.Fatalf("Execute() error = %v, want success", err)
+			if err == nil {
+				t.Fatal("Execute() expected terminal context error, got nil")
 			}
-			if got := exec.ExecuteCalls(); !slicesEqual(got, tt.wantCalls) {
-				t.Errorf("Execute calls = %v, want %v", got, tt.wantCalls)
+			if !errors.Is(err, ErrContextWindowExceeded) {
+				t.Fatalf("Execute() error = %v, want errors.Is ErrContextWindowExceeded", err)
+			}
+			if got, want := exec.ExecuteCalls(), []string{tt.model}; !slicesEqual(got, want) {
+				t.Errorf("Execute calls = %v, want %v (no same-provider downgrade after hook divert)", got, want)
 			}
 		})
 
@@ -173,32 +176,43 @@ func TestCodexContextFallbackChains(t *testing.T) {
 			m, exec := setupCodexFallbackManager(t, "codex-fallback-chain-stream-"+tt.model, tt.errors)
 			result, err := m.ExecuteStream(context.Background(), []string{"codex"}, cliproxyexecutor.Request{Model: tt.model}, cliproxyexecutor.Options{Metadata: map[string]any{}})
 			if err != nil {
-				t.Fatalf("ExecuteStream() error = %v, want success", err)
+				t.Fatalf("ExecuteStream() error = %v, want nil", err)
 			}
 			if result == nil {
 				t.Fatal("ExecuteStream() result = nil, want non-nil")
 			}
-			drainStreamResult(t, result)
-			if got := exec.StreamCalls(); !slicesEqual(got, tt.wantCalls) {
-				t.Errorf("ExecuteStream calls = %v, want %v", got, tt.wantCalls)
+			terminal := drainStreamResult(t, result)
+			if terminal == nil || terminal.Err == nil {
+				t.Fatal("expected terminal stream chunk error")
+			}
+			if !errors.Is(terminal.Err, ErrContextWindowExceeded) {
+				t.Errorf("terminal error = %v, want errors.Is ErrContextWindowExceeded", terminal.Err)
+			}
+			if got, want := exec.StreamCalls(), []string{tt.model}; !slicesEqual(got, want) {
+				t.Errorf("ExecuteStream calls = %v, want %v (no same-provider downgrade after hook divert)", got, want)
 			}
 		})
 	}
 }
 
 func TestCodexContextFallbackStopsAtGPT54(t *testing.T) {
+	// Hook-first precedence: the first context failure is terminal, so the
+	// run stops at the requested model instead of walking the downgrade chain.
 	errs := map[string]error{
 		"gpt-5.6-sol": contextTooLargeError(),
 		"gpt-5.5":     contextTooLargeError(),
 		"gpt-5.4":     contextTooLargeError(),
 	}
-	wantCalls := []string{"gpt-5.6-sol", "gpt-5.5", "gpt-5.4"}
+	wantCalls := []string{"gpt-5.6-sol"}
 
 	t.Run("non-stream", func(t *testing.T) {
 		m, exec := setupCodexFallbackManager(t, "codex-fallback-stop", errs)
 		_, err := m.Execute(context.Background(), []string{"codex"}, cliproxyexecutor.Request{Model: "gpt-5.6-sol"}, cliproxyexecutor.Options{Metadata: map[string]any{}})
 		if err == nil {
 			t.Fatal("Execute() expected error, got nil")
+		}
+		if !errors.Is(err, ErrContextWindowExceeded) {
+			t.Fatalf("Execute() error = %v, want errors.Is ErrContextWindowExceeded", err)
 		}
 		if got := exec.ExecuteCalls(); !slicesEqual(got, wantCalls) {
 			t.Errorf("Execute calls = %v, want %v", got, wantCalls)
@@ -218,8 +232,8 @@ func TestCodexContextFallbackStopsAtGPT54(t *testing.T) {
 		if terminal == nil || terminal.Err == nil {
 			t.Fatal("expected terminal stream chunk error")
 		}
-		if !isContextWindowExceededError(terminal.Err) {
-			t.Errorf("terminal error = %v, want context window exceeded", terminal.Err)
+		if !errors.Is(terminal.Err, ErrContextWindowExceeded) {
+			t.Errorf("terminal error = %v, want errors.Is ErrContextWindowExceeded", terminal.Err)
 		}
 		if got := exec.StreamCalls(); !slicesEqual(got, wantCalls) {
 			t.Errorf("ExecuteStream calls = %v, want %v", got, wantCalls)

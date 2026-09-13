@@ -358,20 +358,10 @@ func isContextWindowExceededError(err error) bool {
 	if err == nil {
 		return false
 	}
-	lower := strings.ToLower(err.Error())
-	tokens := [...]string{
-		"context_too_large",
-		"context_length_exceeded",
-		"context window",
-		"context length",
-		"too many tokens",
+	if errors.Is(err, ErrContextWindowExceeded) {
+		return true
 	}
-	for _, t := range tokens {
-		if strings.Contains(lower, t) {
-			return true
-		}
-	}
-	return false
+	return IsContextWindowExceeded(0, "", "", err.Error(), "")
 }
 
 func isStaticFileNotFoundError(err error) bool {

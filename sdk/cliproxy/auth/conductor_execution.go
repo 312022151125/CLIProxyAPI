@@ -176,6 +176,12 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 			}
 		}
 		if hasCodexProvider(normalized) {
+			if resp, handled, errFallback := m.tryCodexContextProviderFallbackExecute(ctx, normalized, req, opts, lastErr); handled {
+				if errFallback != nil {
+					return cliproxyexecutor.Response{}, errFallback
+				}
+				return resp, nil
+			}
 			if resp, ok := m.tryCodexModelFallbackExecute(ctx, normalized, req, opts, lastErr); ok {
 				return resp, nil
 			}
@@ -334,6 +340,12 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 			}
 		}
 		if hasCodexProvider(normalized) {
+			if result, handled, errFallback := m.tryCodexContextProviderFallbackExecuteStream(ctx, normalized, req, opts, lastErr); handled {
+				if errFallback != nil {
+					return nil, errFallback
+				}
+				return result, nil
+			}
 			if result, ok := m.tryCodexModelFallbackExecuteStream(ctx, normalized, req, opts, lastErr); ok {
 				return result, nil
 			}

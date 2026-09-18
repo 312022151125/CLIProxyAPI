@@ -2492,7 +2492,7 @@
       "display_name": "Codex Auto Review",
       "version": "Codex Auto Review",
       "description": "Automatic approval review model for Codex.",
-      "context_length": 272000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -2527,7 +2527,7 @@
       "display_name": "GPT 5.5",
       "version": "gpt-5.5",
       "description": "Frontier model for complex coding, research, and real-world work.",
-      "context_length": 272000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -2560,7 +2560,7 @@
       "display_name": "GPT 6.0 Astra",
       "version": "gpt-6.0",
       "description": "GPT-6 Astra is our most intelligent model yet, with state-of-the-art performance in computer use, browsing, software engineering, science, and professional work.",
-      "context_length": 272000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -2702,7 +2702,7 @@
       "display_name": "Codex Auto Review",
       "version": "Codex Auto Review",
       "description": "Automatic approval review model for Codex.",
-      "context_length": 272000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -2769,7 +2769,7 @@
       "display_name": "GPT 5.5",
       "version": "gpt-5.5",
       "description": "Frontier model for complex coding, research, and real-world work.",
-      "context_length": 272000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -2802,7 +2802,7 @@
       "display_name": "GPT 6.0 Astra",
       "version": "gpt-6.0",
       "description": "GPT-6 Astra is our most intelligent model yet, with state-of-the-art performance in computer use, browsing, software engineering, science, and professional work.",
-      "context_length": 272000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -2944,7 +2944,7 @@
       "display_name": "Codex Auto Review",
       "version": "Codex Auto Review",
       "description": "Automatic approval review model for Codex.",
-      "context_length": 272000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -3011,7 +3011,7 @@
       "display_name": "GPT 5.5",
       "version": "gpt-5.5",
       "description": "Frontier model for complex coding, research, and real-world work.",
-      "context_length": 272000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -3044,7 +3044,7 @@
       "display_name": "GPT 6.0 Astra",
       "version": "gpt-6.0",
       "description": "GPT-6 Astra is our most intelligent model yet, with state-of-the-art performance in computer use, browsing, software engineering, science, and professional work.",
-      "context_length": 272000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"
@@ -3186,7 +3186,7 @@
       "display_name": "Codex Auto Review",
       "version": "Codex Auto Review",
       "description": "Automatic approval review model for Codex.",
-      "context_length": 272000,
+      "context_length": 1000000,
       "max_completion_tokens": 128000,
       "supported_parameters": [
         "tools"

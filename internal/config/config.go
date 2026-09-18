@@ -157,6 +157,9 @@ type Config struct {
 	// When false (default), the service_tier field is left unchanged.
 	FastServiceTier bool `yaml:"fast-service-tier,omitempty" json:"fast-service-tier,omitempty"`
 
+	// Claude configures provider-wide Claude request behavior.
+	Claude ClaudeConfig `yaml:"claude" json:"claude"`
+
 	// ClaudeKey defines a list of Claude API key configurations as specified in the YAML configuration file.
 	ClaudeKey []ClaudeKey `yaml:"claude-api-key" json:"claude-api-key"`
 

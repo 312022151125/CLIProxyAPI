@@ -4,8 +4,10 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/proxyutil"
 	"golang.org/x/net/context"
 )
 
@@ -25,6 +27,7 @@ type modelExecutionOptions struct {
 	Method                  string
 	RequestPath             string
 	AllowVideoModel         bool
+	ProxyURL                string
 }
 
 // ProtocolExecutionRequest describes a route-level model execution request with explicit protocols.
@@ -55,6 +58,7 @@ type ModelExecutionRequest struct {
 	SkipRouterPluginID      string
 	ForcedProvider          string
 	AuthID                  string
+	ProxyURL                string
 }
 
 // ModelExecutionResponse describes a non-streaming internal model execution response.
@@ -126,6 +130,9 @@ func (h *BaseAPIHandler) ExecuteModel(ctx context.Context, req ModelExecutionReq
 	if req.Stream {
 		return ModelExecutionResponse{}, modelExecutionModeError("ExecuteModel requires Stream=false")
 	}
+	if errProxy := validateModelExecutionProxy(req.ProxyURL); errProxy != nil {
+		return ModelExecutionResponse{}, errProxy
+	}
 	if req.AuthID != "" {
 		ctx = WithPinnedAuthID(ctx, req.AuthID)
 	}
@@ -136,6 +143,7 @@ func (h *BaseAPIHandler) ExecuteModel(ctx context.Context, req ModelExecutionReq
 		SkipInterceptorPluginID: req.SkipInterceptorPluginID,
 		SkipRouterPluginID:      req.SkipRouterPluginID,
 		ForcedProvider:          req.ForcedProvider,
+		ProxyURL:                strings.TrimSpace(req.ProxyURL),
 	})
 	if errMsg != nil {
 		return ModelExecutionResponse{}, errMsg
@@ -156,6 +164,9 @@ func (h *BaseAPIHandler) ExecuteModelStream(ctx context.Context, req ModelExecut
 	if !req.Stream {
 		return ModelExecutionStream{}, modelExecutionModeError("ExecuteModelStream requires Stream=true")
 	}
+	if errProxy := validateModelExecutionProxy(req.ProxyURL); errProxy != nil {
+		return ModelExecutionStream{}, errProxy
+	}
 	if req.AuthID != "" {
 		ctx = WithPinnedAuthID(ctx, req.AuthID)
 	}
@@ -166,6 +177,7 @@ func (h *BaseAPIHandler) ExecuteModelStream(ctx context.Context, req ModelExecut
 		SkipInterceptorPluginID: req.SkipInterceptorPluginID,
 		SkipRouterPluginID:      req.SkipRouterPluginID,
 		ForcedProvider:          req.ForcedProvider,
+		ProxyURL:                strings.TrimSpace(req.ProxyURL),
 	})
 	chunks, errMsg := prepareModelExecutionStream(ctx, dataChan, errChan)
 	if errMsg != nil {
@@ -223,6 +235,17 @@ func (h *BaseAPIHandler) ExecuteProtocolStreamWithAuthManager(ctx context.Contex
 
 func modelExecutionModeError(message string) *interfaces.ErrorMessage {
 	return &interfaces.ErrorMessage{StatusCode: http.StatusBadRequest, Error: errors.New(message)}
+}
+
+func validateModelExecutionProxy(raw string) *interfaces.ErrorMessage {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	if !proxyutil.ValidRequestProxy(raw) {
+		return &interfaces.ErrorMessage{StatusCode: http.StatusBadRequest, Error: errors.New("invalid proxy_url")}
+	}
+	return nil
 }
 
 func modelExecutionResponseProtocol(entryProtocol, exitProtocol string) string {

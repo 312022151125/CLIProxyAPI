@@ -569,8 +569,8 @@ func TestManagerExecuteStream_OpenAICompatAliasPoolRetriesOnEmptyBootstrap(t *te
 		},
 	}
 	m := newOpenAICompatPoolTestManager(t, alias, []internalconfig.OpenAICompatibilityModel{
-		{Name: "deepseek-v3.1", Alias: alias},
-		{Name: "glm-5", Alias: alias},
+		{Name: "deepseek-v3.1", Alias: alias, ForceMapping: boolPtr(false)},
+		{Name: "glm-5", Alias: alias, ForceMapping: boolPtr(false)},
 	}, executor)
 
 	streamResult, err := m.ExecuteStream(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: alias}, cliproxyexecutor.Options{})
@@ -603,8 +603,8 @@ func TestManagerExecuteStream_OpenAICompatAliasPoolFallsBackBeforeFirstByte(t *t
 		streamFirstErrors: map[string]error{"deepseek-v3.1": &Error{HTTPStatus: http.StatusTooManyRequests, Message: "quota"}},
 	}
 	m := newOpenAICompatPoolTestManager(t, alias, []internalconfig.OpenAICompatibilityModel{
-		{Name: "deepseek-v3.1", Alias: alias},
-		{Name: "glm-5", Alias: alias},
+		{Name: "deepseek-v3.1", Alias: alias, ForceMapping: boolPtr(false)},
+		{Name: "glm-5", Alias: alias, ForceMapping: boolPtr(false)},
 	}, executor)
 
 	streamResult, err := m.ExecuteStream(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: alias}, cliproxyexecutor.Options{})
@@ -703,8 +703,8 @@ func TestManagerExecuteStream_OpenAICompatAliasPoolSkipsSuspendedUpstreamOnLater
 		streamFirstErrors: map[string]error{"deepseek-v3.1": modelSupportErr},
 	}
 	m := newOpenAICompatPoolTestManager(t, alias, []internalconfig.OpenAICompatibilityModel{
-		{Name: "deepseek-v3.1", Alias: alias},
-		{Name: "glm-5", Alias: alias},
+		{Name: "deepseek-v3.1", Alias: alias, ForceMapping: boolPtr(false)},
+		{Name: "glm-5", Alias: alias, ForceMapping: boolPtr(false)},
 	}, executor)
 
 	for i := 0; i < 3; i++ {

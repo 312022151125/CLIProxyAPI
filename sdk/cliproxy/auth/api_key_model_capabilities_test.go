@@ -160,7 +160,7 @@ func TestAttachResolvedAPIKeyModelInfoSupportsKeylessOpenAICompatibility(t *test
 				Thinking: &registry.ThinkingSupport{Levels: []string{"high"}},
 			},
 			{
-				Name: "fallback-upstream", Alias: "public-model",
+				Name: "fallback-upstream", Alias: "public-model", ForceMapping: boolPtr(false),
 				Thinking: &registry.ThinkingSupport{Levels: []string{"high"}},
 			},
 		},

@@ -386,7 +386,22 @@ type OAuthModelAlias struct {
 	// DisplayName is the optional human-readable name shown in model catalogs.
 	DisplayName string `yaml:"display-name,omitempty" json:"display-name,omitempty"`
 
-	ForceMapping bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
+	// ForceMapping rewrites upstream response model fields back to Alias.
+	// Defaults to true when omitted.
+	ForceMapping *bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
+}
+
+// GetForceMapping returns the effective force-mapping value for this alias entry.
+// When the field is omitted (nil), it defaults to true.
+func (a OAuthModelAlias) GetForceMapping() bool { return forceMappingEnabled(a.ForceMapping) }
+
+// forceMappingEnabled returns the effective force-mapping value.
+// When the pointer is nil (field omitted from config), it defaults to true.
+func forceMappingEnabled(v *bool) bool {
+	if v == nil {
+		return true
+	}
+	return *v
 }
 
 // PayloadConfig defines default and override parameter rules applied to provider payloads.
@@ -557,7 +572,8 @@ type ClaudeModel struct {
 	MaxContextLength int `yaml:"max-context-length,omitempty" json:"max-context-length,omitempty"`
 
 	// ForceMapping rewrites upstream response model fields back to Alias.
-	ForceMapping bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
+	// Defaults to true when omitted.
+	ForceMapping *bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
 
 	// IsCompat preserves thinking blocks with empty signatures for compatible upstreams
 	// and enables provider-aware signed-thinking replay for Claude-compatible API-key models.
@@ -574,7 +590,7 @@ func (m ClaudeModel) GetAlias() string { return m.Alias }
 
 func (m ClaudeModel) GetDisplayName() string   { return m.DisplayName }
 func (m ClaudeModel) GetMaxContextLength() int { return m.MaxContextLength }
-func (m ClaudeModel) GetForceMapping() bool    { return m.ForceMapping }
+func (m ClaudeModel) GetForceMapping() bool    { return forceMappingEnabled(m.ForceMapping) }
 func (m ClaudeModel) GetIsCompat() bool        { return m.IsCompat }
 
 func (m ClaudeModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
@@ -657,7 +673,8 @@ type CodexModel struct {
 	MaxContextLength int `yaml:"max-context-length,omitempty" json:"max-context-length,omitempty"`
 
 	// ForceMapping rewrites upstream response model fields back to Alias.
-	ForceMapping bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
+	// Defaults to true when omitted.
+	ForceMapping *bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
 
 	// IsCompat converts Codex MultiAgentV2 agent_message items into portable
 	// Responses message/user input when codex.optimize-multi-agent-v2 is also true.
@@ -676,7 +693,7 @@ func (m CodexModel) GetAlias() string { return m.Alias }
 
 func (m CodexModel) GetDisplayName() string   { return m.DisplayName }
 func (m CodexModel) GetMaxContextLength() int { return m.MaxContextLength }
-func (m CodexModel) GetForceMapping() bool    { return m.ForceMapping }
+func (m CodexModel) GetForceMapping() bool    { return forceMappingEnabled(m.ForceMapping) }
 func (m CodexModel) GetIsCompat() bool        { return m.IsCompat }
 
 func (m CodexModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
@@ -760,7 +777,8 @@ type GeminiModel struct {
 	MaxContextLength int `yaml:"max-context-length,omitempty" json:"max-context-length,omitempty"`
 
 	// ForceMapping rewrites upstream response model fields back to Alias.
-	ForceMapping bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
+	// Defaults to true when omitted.
+	ForceMapping *bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
 
 	// IsCompat preserves thinking blocks with empty signatures for compatible upstreams.
 	// Default false keeps the normal signature validation behavior.
@@ -776,7 +794,7 @@ func (m GeminiModel) GetAlias() string { return m.Alias }
 
 func (m GeminiModel) GetDisplayName() string   { return m.DisplayName }
 func (m GeminiModel) GetMaxContextLength() int { return m.MaxContextLength }
-func (m GeminiModel) GetForceMapping() bool    { return m.ForceMapping }
+func (m GeminiModel) GetForceMapping() bool    { return forceMappingEnabled(m.ForceMapping) }
 func (m GeminiModel) GetIsCompat() bool        { return m.IsCompat }
 
 func (m GeminiModel) GetThinking() *registry.ThinkingSupport { return m.Thinking }
@@ -868,7 +886,8 @@ type OpenAICompatibilityModel struct {
 	MaxContextLength int `yaml:"max-context-length,omitempty" json:"max-context-length,omitempty"`
 
 	// ForceMapping rewrites upstream response model fields back to Alias.
-	ForceMapping bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
+	// Defaults to true when omitted.
+	ForceMapping *bool `yaml:"force-mapping,omitempty" json:"force-mapping,omitempty"`
 
 	// Image controls whether this model is callable through /v1/images/* endpoints.
 	// Default is true (enabled). Set to false to explicitly disable image endpoints for this model.
@@ -903,7 +922,7 @@ func (m OpenAICompatibilityModel) GetAlias() string { return m.Alias }
 
 func (m OpenAICompatibilityModel) GetDisplayName() string          { return m.DisplayName }
 func (m OpenAICompatibilityModel) GetMaxContextLength() int        { return m.MaxContextLength }
-func (m OpenAICompatibilityModel) GetForceMapping() bool           { return m.ForceMapping }
+func (m OpenAICompatibilityModel) GetForceMapping() bool           { return forceMappingEnabled(m.ForceMapping) }
 func (m OpenAICompatibilityModel) GetIsCompat() bool               { return m.IsCompat }
 func (m OpenAICompatibilityModel) GetUseMaxCompletionTokens() bool { return m.UseMaxCompletionTokens }
 

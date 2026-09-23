@@ -189,24 +189,24 @@ func TestComputeModelHashesIncludeDisplayName(t *testing.T) {
 }
 
 func TestComputeCodexModelsHashIncludesForceMapping(t *testing.T) {
-	withoutForceMapping := ComputeCodexModelsHash([]config.CodexModel{{Name: "m", Alias: "a"}})
-	withForceMapping := ComputeCodexModelsHash([]config.CodexModel{{Name: "m", Alias: "a", ForceMapping: true}})
-	if withoutForceMapping == "" || withoutForceMapping == withForceMapping {
-		t.Fatalf("force-mapping must change model hash: %q / %q", withoutForceMapping, withForceMapping)
+	withForceMappingFalse := ComputeCodexModelsHash([]config.CodexModel{{Name: "m", Alias: "a", ForceMapping: boolPtr(false)}})
+	withForceMappingTrue := ComputeCodexModelsHash([]config.CodexModel{{Name: "m", Alias: "a", ForceMapping: boolPtr(true)}})
+	if withForceMappingFalse == "" || withForceMappingFalse == withForceMappingTrue {
+		t.Fatalf("force-mapping must change model hash: %q / %q", withForceMappingFalse, withForceMappingTrue)
 	}
 }
 
 func TestComputeOtherModelHashesIncludeForceMapping(t *testing.T) {
-	if ComputeOpenAICompatModelsHash([]config.OpenAICompatibilityModel{{Name: "m"}}) == ComputeOpenAICompatModelsHash([]config.OpenAICompatibilityModel{{Name: "m", ForceMapping: true}}) {
+	if ComputeOpenAICompatModelsHash([]config.OpenAICompatibilityModel{{Name: "m", ForceMapping: boolPtr(false)}}) == ComputeOpenAICompatModelsHash([]config.OpenAICompatibilityModel{{Name: "m", ForceMapping: boolPtr(true)}}) {
 		t.Fatal("OpenAI compatibility force-mapping did not change model hash")
 	}
-	if ComputeVertexCompatModelsHash([]config.VertexCompatModel{{Name: "m"}}) == ComputeVertexCompatModelsHash([]config.VertexCompatModel{{Name: "m", ForceMapping: true}}) {
+	if ComputeVertexCompatModelsHash([]config.VertexCompatModel{{Name: "m", ForceMapping: boolPtr(false)}}) == ComputeVertexCompatModelsHash([]config.VertexCompatModel{{Name: "m", ForceMapping: boolPtr(true)}}) {
 		t.Fatal("Vertex force-mapping did not change model hash")
 	}
-	if ComputeClaudeModelsHash([]config.ClaudeModel{{Name: "m"}}) == ComputeClaudeModelsHash([]config.ClaudeModel{{Name: "m", ForceMapping: true}}) {
+	if ComputeClaudeModelsHash([]config.ClaudeModel{{Name: "m", ForceMapping: boolPtr(false)}}) == ComputeClaudeModelsHash([]config.ClaudeModel{{Name: "m", ForceMapping: boolPtr(true)}}) {
 		t.Fatal("Claude force-mapping did not change model hash")
 	}
-	if ComputeGeminiModelsHash([]config.GeminiModel{{Name: "m"}}) == ComputeGeminiModelsHash([]config.GeminiModel{{Name: "m", ForceMapping: true}}) {
+	if ComputeGeminiModelsHash([]config.GeminiModel{{Name: "m", ForceMapping: boolPtr(false)}}) == ComputeGeminiModelsHash([]config.GeminiModel{{Name: "m", ForceMapping: boolPtr(true)}}) {
 		t.Fatal("Gemini force-mapping did not change model hash")
 	}
 }

@@ -330,7 +330,7 @@ func TestManagerExecute_OpenAICompatAliasResolvesColonEffort(t *testing.T) {
 func TestResolveModelAliasPoolPrefersExactSuffixedAlias(t *testing.T) {
 	models := []modelAliasEntry{
 		internalconfig.OpenAICompatibilityModel{Name: "base-model", Alias: "public"},
-		internalconfig.OpenAICompatibilityModel{Name: "low-model", Alias: "public(low)", ForceMapping: true},
+		internalconfig.OpenAICompatibilityModel{Name: "low-model", Alias: "public(low)", ForceMapping: boolPtr(true)},
 	}
 	got := resolveModelAliasPoolFromConfigModels("public(low)", models)
 	if len(got) != 1 || got[0] != "low-model(low)" {
@@ -382,8 +382,8 @@ func TestManagerExecute_OpenAICompatAliasPoolForceMappingRotatesAndRewritesRespo
 		},
 	}
 	m := newOpenAICompatPoolTestManager(t, alias, []internalconfig.OpenAICompatibilityModel{
-		{Name: "deepseek-v3.1", Alias: alias, ForceMapping: true},
-		{Name: "glm-5", Alias: alias, ForceMapping: true},
+		{Name: "deepseek-v3.1", Alias: alias, ForceMapping: boolPtr(true)},
+		{Name: "glm-5", Alias: alias, ForceMapping: boolPtr(true)},
 	}, executor)
 
 	var payloads []string
@@ -547,8 +547,8 @@ func TestManagerExecute_OpenAICompatAliasPoolUsesSelectedModelForceMapping(t *te
 		executePayloads: map[string][]byte{"second-upstream": []byte(`{"model":"second-upstream"}`)},
 	}
 	manager := newOpenAICompatPoolTestManager(t, alias, []internalconfig.OpenAICompatibilityModel{
-		{Name: "first-upstream", Alias: alias, ForceMapping: true},
-		{Name: "second-upstream", Alias: alias},
+		{Name: "first-upstream", Alias: alias, ForceMapping: boolPtr(true)},
+		{Name: "second-upstream", Alias: alias, ForceMapping: boolPtr(false)},
 	}, executor)
 
 	response, errExecute := manager.Execute(context.Background(), []string{openAICompatPoolProviderKey}, cliproxyexecutor.Request{Model: alias}, cliproxyexecutor.Options{})

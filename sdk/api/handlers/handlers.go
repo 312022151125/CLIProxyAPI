@@ -55,6 +55,19 @@ type ErrorDetail struct {
 
 const idempotencyKeyMetadataKey = "idempotency_key"
 
+const errorBrandingSuffix = " (llmgate.app)"
+
+// withErrorBranding appends the service website to locally built error messages.
+// Upstream JSON payloads returned as-is never pass through here, so clients
+// matching on upstream text are unaffected. Prefix matching still works
+// because the suffix is always at the end.
+func withErrorBranding(msg string) string {
+	if msg == "" || strings.Contains(msg, "llmgate.app") {
+		return msg
+	}
+	return msg + errorBrandingSuffix
+}
+
 const (
 	defaultStreamingKeepAliveSeconds = 0
 	defaultStreamingBootstrapRetries = 0
@@ -96,6 +109,7 @@ func BuildErrorResponseBodyWithError(status int, errText string, err error) []by
 				}
 			}
 		}
+		message = withErrorBranding(message)
 		r := false
 		payload, errMarshal := json.Marshal(ErrorResponse{
 			Error: ErrorDetail{
@@ -139,13 +153,13 @@ func BuildErrorResponseBodyWithError(status int, errText string, err error) []by
 
 	payload, errMarshal := json.Marshal(ErrorResponse{
 		Error: ErrorDetail{
-			Message: errText,
+			Message: withErrorBranding(errText),
 			Type:    errType,
 			Code:    code,
 		},
 	})
 	if errMarshal != nil {
-		return []byte(fmt.Sprintf(`{"error":{"message":%q,"type":"server_error","code":"internal_server_error"}}`, errText))
+		return []byte(fmt.Sprintf(`{"error":{"message":%q,"type":"server_error","code":"internal_server_error"}}`, withErrorBranding(errText)))
 	}
 	return payload
 }

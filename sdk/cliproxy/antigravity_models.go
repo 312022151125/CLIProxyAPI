@@ -342,23 +342,6 @@ func parseAntigravityModelCapabilityHints(body []byte) (antigravityModelCapabili
 	return antigravityModelCapabilityHints{WebSearchModelIDs: webSearchModels}, true
 }
 
-func applyAntigravityFetchedModelCapabilities(models []*ModelInfo, hints antigravityModelCapabilityHints) []*ModelInfo {
-	if len(models) == 0 || len(hints.WebSearchModelIDs) == 0 {
-		return models
-	}
-
-	for _, model := range models {
-		if model == nil {
-			continue
-		}
-		modelID := normalizeAntigravityFetchedModelID(model.ID)
-		if _, ok := hints.WebSearchModelIDs[modelID]; ok {
-			model.SupportsWebSearch = true
-		}
-	}
-	return models
-}
-
 func normalizeAntigravityFetchedModelID(modelID string) string {
 	return strings.ToLower(strings.TrimSpace(modelID))
 }
@@ -434,6 +417,9 @@ func (s *Service) asyncProbeAntigravityCapabilities(ctx context.Context, auth *c
 			upstreamID := resolveAntigravityUpstreamModelID(modelID, authClone.Prefix, aliasMap)
 			if _, ok := hints.WebSearchModelIDs[upstreamID]; ok {
 				info.SupportsWebSearch = true
+			} else {
+				// ponytail: fetched list is authoritative; a missing ID clears the static flag.
+				info.SupportsWebSearch = false
 			}
 		})
 		if !updated {

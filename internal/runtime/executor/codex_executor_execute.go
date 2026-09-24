@@ -118,6 +118,62 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		b, _ := io.ReadAll(httpResp.Body)
 		b = applyCodexIdentityConfuseResponsePayload(b, identityState)
+		if isCodexTokenInvalidatedResponse(httpResp.StatusCode, b) {
+			retryResp, newAuth, newIdentityState, retried, retryErr := e.retryAfterCodexTokenInvalidated(ctx, auth, from, "/responses", req, originalPayloadSource, body, httpClient, httpResp)
+			if retryErr != nil {
+				return resp, retryErr
+			}
+			if retried {
+				auth = newAuth
+				httpResp = retryResp
+				identityState = newIdentityState
+				if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
+					goto codexExecuteReadSuccess
+				}
+				b, _ = io.ReadAll(httpResp.Body)
+				b = applyCodexIdentityConfuseResponsePayload(b, identityState)
+			}
+		} else if helps.IsUnsupportedReasoningParamError(httpResp.StatusCode, b) {
+			// ponytail: one strip-and-resend only; further rejected params need per-model capability flags.
+			if stripped := helps.StripReasoningEffortParameters(body); !bytes.Equal(stripped, body) {
+				body = stripped
+				if errClose := httpResp.Body.Close(); errClose != nil {
+					log.Errorf("codex executor: close response body error: %v", errClose)
+				}
+				helps.LogWithRequestID(ctx).Debugf("codex executor: stripping unsupported reasoning parameter and retrying once")
+				retryReq, retryUpstreamBody, retryIdentityState, retryReqErr := e.cacheHelper(ctx, from, url, auth, req, originalPayloadSource, body, opts.Headers)
+				if retryReqErr == nil {
+					applyCodexHeaders(retryReq, auth, apiKey, true, e.cfg, opts.Headers)
+					applyModelHeaderOverrides(retryReq.Header, baseModel)
+					applyCodexIdentityConfuseHeaders(retryReq.Header, &retryIdentityState)
+					helps.RecordAPIRequest(ctx, e.cfg, helps.UpstreamRequestLog{
+						URL:       url,
+						Method:    http.MethodPost,
+						Headers:   retryReq.Header.Clone(),
+						Body:      retryUpstreamBody,
+						Provider:  e.Identifier(),
+						AuthID:    authID,
+						AuthLabel: authLabel,
+						AuthType:  authType,
+						AuthValue: authValue,
+					})
+					retryResp, errDo := httpClient.Do(retryReq)
+					if errDo == nil {
+						httpResp = retryResp
+						identityState = retryIdentityState
+						helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
+						if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
+							goto codexExecuteReadSuccess
+						}
+						b, _ = io.ReadAll(httpResp.Body)
+						b = applyCodexIdentityConfuseResponsePayload(b, identityState)
+					} else {
+						helps.RecordAPIResponseError(ctx, e.cfg, errDo)
+						return resp, errDo
+					}
+				}
+			}
+		}
 		if errClearReplay := clearCodexReasoningReplayOnInvalidSignature(ctx, replayScope, httpResp.StatusCode, b); errClearReplay != nil {
 			return resp, errClearReplay
 		}
@@ -126,6 +182,7 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 		err = newCodexStatusErrWithCooling(httpResp.StatusCode, b, e.modelLevelCooling())
 		return resp, err
 	}
+codexExecuteReadSuccess:
 	data, errRead := io.ReadAll(httpResp.Body)
 	upstreamData := applyCodexIdentityConfuseResponsePayload(data, identityState)
 	helps.AppendAPIResponseChunk(ctx, e.cfg, upstreamData)

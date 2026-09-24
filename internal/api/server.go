@@ -168,6 +168,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	// output, sanitizing kiro branding on all responses.
 	engine.Use(middleware.KiroMaskingMiddleware())
 	engine.Use(middleware.KiraMaskingMiddleware())
+	engine.Use(middleware.AntigravityMaskingMiddleware())
 	wd, err := os.Getwd()
 	if err != nil {
 		wd = configFilePath

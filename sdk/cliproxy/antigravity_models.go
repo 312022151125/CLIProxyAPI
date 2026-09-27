@@ -417,9 +417,6 @@ func (s *Service) asyncProbeAntigravityCapabilities(ctx context.Context, auth *c
 			upstreamID := resolveAntigravityUpstreamModelID(modelID, authClone.Prefix, aliasMap)
 			if _, ok := hints.WebSearchModelIDs[upstreamID]; ok {
 				info.SupportsWebSearch = true
-			} else {
-				// ponytail: fetched list is authoritative; a missing ID clears the static flag.
-				info.SupportsWebSearch = false
 			}
 		})
 		if !updated {

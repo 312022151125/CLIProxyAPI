@@ -3,7 +3,7 @@ package modelversion
 import (
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 )
 
 func registerTestModels(t *testing.T, clientID, provider string, ids ...string) {

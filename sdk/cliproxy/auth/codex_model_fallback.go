@@ -5,9 +5,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/modelversion"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/modelversion"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
 // hasCodexProvider reports whether any of the given providers is the Codex OAuth provider.

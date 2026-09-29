@@ -77,7 +77,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 	body = sanitizeOpenAIResponsesReasoningEncryptedContentWithCompat(ctx, "codex executor", body, isCompat)
 	body = normalizeCodexParallelToolCalls(body, opts.Headers)
 	body = helps.NormalizeCodexToolSchemas(body)
-	body, optimizeMultiAgentV2 := helps.OptimizeCodexMultiAgentV2RequestForAuth(ctx, opts.Headers, body, e.cfg, auth, baseModel)
+	body, optimizeMultiAgentV2 := helps.OptimizeCodexMultiAgentV2RequestForAuth(ctx, opts.Headers, body, e.cfg, auth, isCompat)
 	body, replayScope, errReplay := applyCodexReasoningReplayCacheRequired(ctx, from, req, opts, body)
 	if errReplay != nil {
 		return nil, errReplay
@@ -85,15 +85,13 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 	reporter.SetTranslatedReasoningEffort(body, to.String())
 
 	url := strings.TrimSuffix(baseURL, "/") + "/responses"
-	var identityState codexIdentityConfuseState
-	httpReq, upstreamBody, identityState, err := e.cacheHelper(ctx, from, url, auth, req, originalPayloadSource, body, opts.Headers)
+	httpReq, upstreamBody, err := e.cacheHelper(ctx, from, url, req, body, opts.Headers)
 	if err != nil {
 		return nil, err
 	}
 	applyCodexHeaders(httpReq, auth, apiKey, true, e.cfg, opts.Headers)
 	applyCodexRoutingHint(ctx, httpReq.Header, auth, baseModel, upstreamBody, opts.Headers)
 	applyModelHeaderOverrides(httpReq.Header, baseModel)
-	applyCodexIdentityConfuseHeaders(httpReq.Header, &identityState)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -128,34 +126,6 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 			}
 			helps.RecordAPIResponseError(ctx, e.cfg, readErr)
 			return nil, readErr
-		}
-		data = applyCodexIdentityConfuseResponsePayload(data, identityState)
-		if isCodexTokenInvalidatedResponse(httpResp.StatusCode, data) {
-			retryResp, newAuth, newIdentityState, retried, retryErr := e.retryAfterCodexTokenInvalidated(ctx, auth, from, "/responses", req, originalPayloadSource, body, httpClient, httpResp)
-			if retryErr != nil {
-				return nil, retryErr
-			}
-			if retried {
-				auth = newAuth
-				httpResp = retryResp
-				identityState = newIdentityState
-				if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
-					goto codexStreamReadSuccess
-				}
-				retryData, retryReadErr := io.ReadAll(httpResp.Body)
-				if errClose := httpResp.Body.Close(); errClose != nil {
-					log.Errorf("codex executor: close response body error: %v", errClose)
-				}
-				if retryReadErr != nil {
-					helps.RecordAPIResponseError(ctx, e.cfg, retryReadErr)
-					return nil, retryReadErr
-				}
-				data = applyCodexIdentityConfuseResponsePayload(retryData, identityState)
-			} else if errClose := httpResp.Body.Close(); errClose != nil {
-				log.Errorf("codex executor: close response body error: %v", errClose)
-			}
-		} else if errClose := httpResp.Body.Close(); errClose != nil {
-			log.Errorf("codex executor: close response body error: %v", errClose)
 		}
 		if errClearReplay := clearCodexReasoningReplayOnInvalidSignature(ctx, replayScope, httpResp.StatusCode, data); errClearReplay != nil {
 			return nil, errClearReplay
@@ -213,7 +183,7 @@ codexStreamReadSuccess:
 	sawOutputDelta := false
 	if buffering {
 		for scanner.Scan() {
-			line := applyCodexIdentityConfuseResponsePayload(scanner.Bytes(), identityState)
+			line := scanner.Bytes()
 			helps.AppendAPIResponseChunk(ctx, e.cfg, line)
 			var translatedLine []byte
 			isHandshake := false
@@ -301,7 +271,6 @@ codexStreamReadSuccess:
 				isHandshake = true
 			}
 
-			translatedLine = applyCodexIdentityExposeResponsePayload(translatedLine, identityState)
 			chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, originalPayload, body, translatedLine, &param, claudeInputTokens)
 			if isHandshake && !terminalSuccess {
 				frameBytes := len(line)
@@ -387,7 +356,7 @@ codexStreamReadSuccess:
 			}
 		}()
 		for scanner.Scan() {
-			line := applyCodexIdentityConfuseResponsePayload(scanner.Bytes(), identityState)
+			line := scanner.Bytes()
 			helps.AppendAPIResponseChunk(ctx, e.cfg, line)
 			var translatedLine []byte
 			terminalSuccess := false
@@ -455,7 +424,6 @@ codexStreamReadSuccess:
 				translatedLine = bytes.Clone(line)
 			}
 
-			translatedLine = applyCodexIdentityExposeResponsePayload(translatedLine, identityState)
 			chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, originalPayload, body, translatedLine, &param, claudeInputTokens)
 			for i := range chunks {
 				select {

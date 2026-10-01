@@ -57,7 +57,7 @@ func TestMaskKiro(t *testing.T) {
 	}
 }
 
-func TestIsClaudeModel(t *testing.T) {
+func TestIsMaskedModel(t *testing.T) {
 	tests := []struct {
 		model string
 		want  bool
@@ -69,15 +69,21 @@ func TestIsClaudeModel(t *testing.T) {
 		{"claude-3-5-sonnet-20241022", true},
 		{"CLAUDE-3-7-SONNET", true},
 		{"anthropic/claude-3.5-sonnet", true},
-		{"gpt-4o", false},
+		{"gpt-5.6", true},
+		{"gpt-5.6-sol", true},
+		{"gpt-5.6-luna", true},
+		{"vendor/gpt-5.6-sol", true},
+		{" GPT-5.6-SOL ", true},
 		{"gpt-5.4", false},
+		{"gpt-5.60", false},
+		{"gpt-4o", false},
 		{"gemini-2.5-flash", false},
 		{"deepseek-chat", false},
 		{"", false},
 	}
 	for _, tt := range tests {
-		if got := isClaudeModel(tt.model); got != tt.want {
-			t.Errorf("isClaudeModel(%q) = %v, want %v", tt.model, got, tt.want)
+		if got := isMaskedModel(tt.model); got != tt.want {
+			t.Errorf("isMaskedModel(%q) = %v, want %v", tt.model, got, tt.want)
 		}
 	}
 }
@@ -131,6 +137,30 @@ func TestKiroMaskingNonClaudeModelUntouched(t *testing.T) {
 	}
 	// Non-Claude models must NOT be masked
 	if got, want := rec.Body.String(), `{"content": "powered by kiro.dev and kiro"}`; got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+func TestKiroMaskingGPT56Model(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(KiroMaskingMiddleware())
+	r.POST("/v1/chat/completions", func(c *gin.Context) {
+		c.Header("Content-Type", "application/json")
+		c.Header("Content-Length", "1000")
+		c.Status(http.StatusOK)
+		c.Writer.WriteString(`{"content": "powered by kiro.dev and kiro"}`)
+	})
+
+	reqBody := `{"model": "gpt-5.6-sol", "messages": [{"role": "user", "content": "hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got, want := rec.Body.String(), `{"content": "powered by claude.ai and claude"}`; got != want {
 		t.Errorf("body = %q, want %q", got, want)
 	}
 }

@@ -9,9 +9,10 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// KiroMaskingMiddleware wraps responses for Claude models and replaces kiro.dev -> claude.ai
-// and kiro -> claude in the body, so clients perceive the service purely as Claude.
-// The replacement is applied to both streaming and non-streaming responses when the requested model is a Claude model.
+// KiroMaskingMiddleware wraps responses for Claude and GPT-5.6 models and replaces
+// kiro.dev -> claude.ai and kiro -> claude in the body, so clients perceive the
+// service purely as Claude. The replacement is applied to both streaming and
+// non-streaming responses when the requested model is masked.
 func KiroMaskingMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if shouldMaskRequest(c) {
@@ -21,7 +22,8 @@ func KiroMaskingMiddleware() gin.HandlerFunc {
 	}
 }
 
-// shouldMaskRequest checks whether the incoming request is targeting a Claude model.
+// shouldMaskRequest checks whether the incoming request targets a masked model
+// (Claude models or gpt-5.6-* models).
 func shouldMaskRequest(c *gin.Context) bool {
 	if c == nil || c.Request == nil {
 		return false
@@ -29,14 +31,14 @@ func shouldMaskRequest(c *gin.Context) bool {
 
 	// 1. Check query parameter `model`
 	if queryModel := c.Query("model"); queryModel != "" {
-		if isClaudeModel(queryModel) {
+		if isMaskedModel(queryModel) {
 			return true
 		}
 	}
 
 	// 2. Check URL path
 	path := strings.ToLower(c.Request.URL.Path)
-	if strings.Contains(path, "claude") {
+	if strings.Contains(path, "claude") || strings.Contains(path, "gpt-5.6") {
 		return true
 	}
 
@@ -47,7 +49,7 @@ func shouldMaskRequest(c *gin.Context) bool {
 			// Restore the body so downstream handlers and middleware can read it.
 			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 			model := gjson.GetBytes(bodyBytes, "model").String()
-			if isClaudeModel(model) {
+			if isMaskedModel(model) {
 				return true
 			}
 		}
@@ -56,10 +58,22 @@ func shouldMaskRequest(c *gin.Context) bool {
 	return false
 }
 
-// isClaudeModel returns true if the model name indicates a Claude model (e.g. claude-, claude-haiku-4-5, etc.).
-func isClaudeModel(model string) bool {
+// isMaskedModel returns true if the model name indicates a model whose responses
+// must be masked (Claude models, e.g. claude-haiku-4-5, or gpt-5.6-* models).
+func isMaskedModel(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
-	return strings.Contains(m, "claude")
+	if m == "" {
+		return false
+	}
+	if strings.Contains(m, "claude") {
+		return true
+	}
+	// Match gpt-5.6 optionally prefixed by a namespace or vendor segment
+	// (e.g. "gpt-5.6-sol", "vendor/gpt-5.6-sol").
+	if idx := strings.LastIndex(m, "/"); idx >= 0 {
+		m = m[idx+1:]
+	}
+	return strings.HasPrefix(m, "gpt-5.6")
 }
 
 // kiroMaskingResponseWriter intercepts Write/WriteString to transform the response

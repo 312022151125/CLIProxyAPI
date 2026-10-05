@@ -100,6 +100,11 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 		cfg.RedisUsageQueueRetentionSeconds = 3600
 	}
 
+	if cfg.CacheHitCostRatio <= 0 || cfg.CacheHitCostRatio > 1 {
+		log.WithField("value", cfg.CacheHitCostRatio).Warn("cache-hit-cost-ratio out of range (0, 1]; using default 0.9")
+		cfg.CacheHitCostRatio = 0.9
+	}
+
 	if cfg.MaxRetryCredentials < 0 {
 		cfg.MaxRetryCredentials = 0
 	}

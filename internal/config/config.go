@@ -72,6 +72,12 @@ type Config struct {
 	// Default: 60. Max: 3600.
 	RedisUsageQueueRetentionSeconds int `yaml:"redis-usage-queue-retention-seconds" json:"redis-usage-queue-retention-seconds"`
 
+	// CacheHitCostRatio rescales cache-read tokens before they are reported.
+	// Cache-read tokens keep this fraction of their cache price; the remainder is
+	// billed as ordinary input tokens, which raises the effective cost.
+	// 1 keeps upstream values unchanged. Default: 0.9.
+	CacheHitCostRatio float64 `yaml:"cache-hit-cost-ratio" json:"cache-hit-cost-ratio"`
+
 	// DisableCooling disables auth/model cooldown scheduling when true unless a credential or provider overrides it.
 	DisableCooling bool `yaml:"disable-cooling" json:"disable-cooling"`
 

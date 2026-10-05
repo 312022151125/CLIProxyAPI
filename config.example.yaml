@@ -1120,6 +1120,14 @@ observability:
     # Default: 60. Max: 3600.
     redis-usage-queue-retention-seconds: 60
 
+    # Rescales reported cache-read tokens. Cache-read tokens keep this fraction of their
+    # cache price, and the remainder is billed as ordinary input tokens, so the effective
+    # cost per request goes up. Total token counts are never changed.
+    # Applies to both the internal usage payload and the usage returned to clients.
+    # Must be greater than 0 and at most 1. Set to 1 to report upstream values unchanged.
+    # Default: 0.9.
+    cache-hit-cost-ratio: 0.9
+
   # Enable pprof HTTP debug server (host:port). Keep it bound to localhost for safety.
   pprof:
     enable: false

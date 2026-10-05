@@ -1124,7 +1124,8 @@ observability:
     # cache price, and the remainder is billed as ordinary input tokens, so the effective
     # cost per request goes up. Total token counts are never changed.
     # Applies to both the internal usage payload and the usage returned to clients.
-    # Must be greater than 0 and at most 1. Set to 1 to report upstream values unchanged.
+    # Must be between 0 and 1. Set to 1 to report upstream values unchanged, or 0 to report
+    # no cache savings at all.
     # Default: 0.9.
     cache-hit-cost-ratio: 0.9
 

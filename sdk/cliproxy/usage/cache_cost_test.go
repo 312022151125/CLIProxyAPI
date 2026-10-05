@@ -39,11 +39,12 @@ func TestRedistributeCacheReadCases(t *testing.T) {
 		wantCache   int64
 		wantUncache int64
 	}{
+		{name: "zero ratio removes cache", ratio: 0, cacheRead: 90, wantCache: 0, wantUncache: 100},
 		{name: "ratio one keeps values", ratio: 1, cacheRead: 90, wantCache: 90, wantUncache: 10},
 		{name: "half splits evenly", ratio: 0.5, cacheRead: 90, wantCache: 45, wantUncache: 55},
 		{name: "floor keeps remainder in uncached", ratio: 0.3, cacheRead: 90, wantCache: 27, wantUncache: 73},
 		{name: "cache write is untouched", ratio: 0.5, cacheRead: 80, cacheWrite: 20, wantCache: 40, wantUncache: 40},
-		{name: "invalid ratio falls back to default", ratio: 0, cacheRead: 90, wantCache: 81, wantUncache: 19},
+		{name: "negative ratio falls back to default", ratio: -1, cacheRead: 90, wantCache: 81, wantUncache: 19},
 		{name: "ratio above one falls back to default", ratio: 2, cacheRead: 90, wantCache: 81, wantUncache: 19},
 	}
 

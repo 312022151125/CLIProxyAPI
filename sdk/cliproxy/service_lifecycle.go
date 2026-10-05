@@ -60,7 +60,7 @@ func (s *Service) Run(ctx context.Context) error {
 	if homeEnabled {
 		forceHomeRuntimeConfig(s.cfg)
 		redisqueue.SetUsageStatisticsEnabled(true)
-		cachecost.SetRatio(s.cfg.CacheHitCostRatio)
+		cachecost.SetRatio(s.cfg.CacheHitCostRatioValue())
 	}
 
 	defer func() {

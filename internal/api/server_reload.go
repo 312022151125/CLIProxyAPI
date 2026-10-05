@@ -95,8 +95,8 @@ func (s *Server) UpdateClientsContext(ctx context.Context, cfg *config.Config) b
 		redisqueue.SetRetentionSeconds(cfg.RedisUsageQueueRetentionSeconds)
 	}
 
-	if oldCfg == nil || oldCfg.CacheHitCostRatio != cfg.CacheHitCostRatio {
-		cachecost.SetRatio(cfg.CacheHitCostRatio)
+	if oldCfg == nil || oldCfg.CacheHitCostRatioValue() != cfg.CacheHitCostRatioValue() {
+		cachecost.SetRatio(cfg.CacheHitCostRatioValue())
 	}
 
 	if s.requestLogger != nil && (oldCfg == nil || oldCfg.ErrorLogsMaxFiles != cfg.ErrorLogsMaxFiles) {

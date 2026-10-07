@@ -24,7 +24,7 @@ func TestGetRequestDetailsWithOptions_AllowVideoModelFallback(t *testing.T) {
 
 	h := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, coreauth.NewManager(nil, nil, nil))
 
-	providers, _, errMsg := h.getRequestDetailsWithOptions("", false, true)
+	providers, _, errMsg := h.getRequestDetailsWithOptions("", false, false, true)
 	if errMsg != nil {
 		t.Fatalf("expected no error with allowVideoModel=true and empty model, got: %v", errMsg.Error)
 	}
@@ -57,7 +57,7 @@ func TestGetRequestDetailsWithOptions_AllowVideoModelKnownModel(t *testing.T) {
 
 	h := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, coreauth.NewManager(nil, nil, nil))
 
-	providers, model, errMsg := h.getRequestDetailsWithOptions("grok-imagine-video-known", false, true)
+	providers, model, errMsg := h.getRequestDetailsWithOptions("grok-imagine-video-known", false, false, true)
 	if errMsg != nil {
 		t.Fatalf("unexpected error: %v", errMsg.Error)
 	}
@@ -75,7 +75,7 @@ func TestGetRequestDetailsWithOptions_NoAllowVideoModelRejectsEmpty(t *testing.T
 	t.Parallel()
 	h := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, coreauth.NewManager(nil, nil, nil))
 
-	_, _, errMsg := h.getRequestDetailsWithOptions("", false)
+	_, _, errMsg := h.getRequestDetailsWithOptions("", false, false, false)
 	if errMsg == nil {
 		t.Fatal("expected error for empty model without allowVideoModel, got nil")
 	}
@@ -90,7 +90,7 @@ func TestGetRequestDetailsWithOptions_NoAllowVideoModelRejectsUnknown(t *testing
 	t.Parallel()
 	h := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, coreauth.NewManager(nil, nil, nil))
 
-	_, _, errMsg := h.getRequestDetailsWithOptions("completely-unknown-video-model-xyz", false)
+	_, _, errMsg := h.getRequestDetailsWithOptions("completely-unknown-video-model-xyz", false, false, false)
 	if errMsg == nil {
 		t.Fatal("expected error for unknown model without allowVideoModel, got nil")
 	}

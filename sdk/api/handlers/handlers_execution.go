@@ -58,6 +58,8 @@ func (h *BaseAPIHandler) executeWithAuthManager(ctx context.Context, handlerType
 // execution through the model version fallback chain.
 func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entryProtocol, exitProtocol, modelName string, rawJSON []byte, alt string, allowImageModel bool, execOptions modelExecutionOptions) ([]byte, http.Header, *interfaces.ErrorMessage) {
 	originalRequestedModel := modelName
+	// Speech-only models are reachable solely through the speech entry protocol.
+	execOptions.AllowSpeechModel = isModelExecutionSpeechProtocol(entryProtocol)
 	routeDecision := h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, false, execOptions)
 	if routeDecision.ExecutorPluginID != "" {
 		responseProtocol := modelExecutionResponseProtocol(entryProtocol, exitProtocol)

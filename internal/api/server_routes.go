@@ -84,6 +84,8 @@ func (s *Server) setupRoutes() {
 		v1.GET("/videos/:request_id/content", openaiHandlers.XAIVideosContent)
 		v1.DELETE("/videos/:request_id", openaiHandlers.XAIVideosDelete)
 		v1.POST("/videos/:request_id/remix", openaiHandlers.XAIVideosRemix)
+		v1.POST("/audio/speech", openaiHandlers.AudioSpeech)
+		v1.POST("/tts", openaiHandlers.XAITTS)
 		v1.POST("/messages", claudeCodeHandlers.ClaudeMessages)
 		v1.POST("/messages/count_tokens", claudeCodeHandlers.ClaudeCountTokens)
 		v1.GET("/responses", openaiResponsesHandlers.ResponsesWebsocket)

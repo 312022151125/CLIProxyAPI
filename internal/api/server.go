@@ -170,7 +170,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	// Masking runs last so its response writer wraps every other middleware's
 	// output, sanitizing kiro branding on all responses.
 	engine.Use(middleware.KiroMaskingMiddleware())
-	engine.Use(middleware.KiraMaskingMiddleware())
+	engine.Use(middleware.BrandMaskingMiddleware())
 	engine.Use(middleware.AntigravityMaskingMiddleware())
 	wd, err := os.Getwd()
 	if err != nil {

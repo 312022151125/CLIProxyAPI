@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func TestMaskKira(t *testing.T) {
+func TestMaskBrand(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
@@ -33,32 +33,42 @@ func TestMaskKira(t *testing.T) {
 			want: "LLMGATE.APP",
 		},
 		{
+			name: "opencode2api brand replaced",
+			in:   `{"error":{"message":"opencode2api: quota exceeded"}}`,
+			want: `{"error":{"message":"llmgate.app: quota exceeded"}}`,
+		},
+		{
+			name: "uppercase opencode2api replaced",
+			in:   "OPENCODE2API",
+			want: "LLMGATE.APP",
+		},
+		{
 			name: "Kira AI replaced",
 			in:   "Kira AI is here",
 			want: "Model AI is here",
 		},
 		{
-			name: "no kira leaves input untouched",
+			name: "no branding leaves input untouched",
 			in:   `{"ok": true}`,
 			want: `{"ok": true}`,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := maskKira(tt.in); got != tt.want {
-				t.Errorf("maskKira(%q) = %q, want %q", tt.in, got, tt.want)
+			if got := maskBrand(tt.in); got != tt.want {
+				t.Errorf("maskBrand(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestKiraMaskingAllModels(t *testing.T) {
+func TestBrandMaskingAllModels(t *testing.T) {
 	models := []string{"gemini-2.5-flash", "gpt-4o", "claude-3-5-sonnet", "deepseek-chat", ""}
 	for _, model := range models {
 		t.Run("model="+model, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			r := gin.New()
-			r.Use(KiraMaskingMiddleware())
+			r.Use(BrandMaskingMiddleware())
 			r.POST("/v1/chat/completions", func(c *gin.Context) {
 				c.Header("Content-Type", "application/json")
 				c.Header("Content-Length", "1000")
@@ -84,10 +94,10 @@ func TestKiraMaskingAllModels(t *testing.T) {
 	}
 }
 
-func TestKiraMaskingStreaming(t *testing.T) {
+func TestBrandMaskingStreaming(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(KiraMaskingMiddleware())
+	r.Use(BrandMaskingMiddleware())
 	r.POST("/v1/messages", func(c *gin.Context) {
 		c.Header("Content-Type", "text/event-stream")
 		c.Writer.WriteHeader(http.StatusOK)

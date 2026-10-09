@@ -18,18 +18,33 @@ const defaultSpoolMemoryLimit = 1 << 20
 // dir once the in-memory buffer would exceed limit. Each streaming request owns
 // one spool; it is not safe for concurrent use.
 type bodySpool struct {
-	dir   string
-	limit int
-	mem   bytes.Buffer
-	file  *os.File
-	buf   *bufio.Writer
-	path  string
+	dir     string
+	dirFunc func() (string, error)
+	prefix  string
+	limit   int
+	mem     bytes.Buffer
+	file    *os.File
+	buf     *bufio.Writer
+	path    string
 }
 
 // newBodySpool creates a spool that spills into dir after limit bytes.
 // A limit of zero spills on the first non-empty write.
 func newBodySpool(dir string, limit int) *bodySpool {
 	return &bodySpool{dir: dir, limit: limit}
+}
+
+// withDirFunc makes the spill directory resolve lazily, on first spill only, so a
+// payload that stays under limit never creates a directory.
+func (s *bodySpool) withDirFunc(dirFunc func() (string, error)) *bodySpool {
+	s.dirFunc = dirFunc
+	return s
+}
+
+// withPrefix names the spill file after the caller-supplied prefix.
+func (s *bodySpool) withPrefix(prefix string) *bodySpool {
+	s.prefix = sanitizeTempPrefix(prefix)
+	return s
 }
 
 // Write appends p. The bytes are copied into the spool, so the caller keeps
@@ -47,9 +62,36 @@ func (s *bodySpool) Write(p []byte) (int, error) {
 	return s.buf.Write(p)
 }
 
+// WriteString appends text. The string is copied into the spool, so the caller
+// keeps ownership of text.
+func (s *bodySpool) WriteString(text string) (int, error) {
+	if s.file == nil && s.mem.Len()+len(text) <= s.limit {
+		return s.mem.WriteString(text)
+	}
+
+	if s.file == nil {
+		if errSpill := s.spill(); errSpill != nil {
+			return 0, errSpill
+		}
+	}
+	return s.buf.WriteString(text)
+}
+
 // spill moves the buffered bytes into a fresh temporary file in dir.
 func (s *bodySpool) spill() error {
-	file, errCreate := os.CreateTemp(s.dir, "spool-*.tmp")
+	dir := s.dir
+	if s.dirFunc != nil {
+		resolved, errDir := s.dirFunc()
+		if errDir != nil {
+			return errDir
+		}
+		dir = resolved
+	}
+	pattern := "spool-*.tmp"
+	if s.prefix != "" {
+		pattern = s.prefix + "-*.tmp"
+	}
+	file, errCreate := os.CreateTemp(dir, pattern)
 	if errCreate != nil {
 		return errCreate
 	}
@@ -107,6 +149,15 @@ func (s *bodySpool) Reader() (io.ReadCloser, error) {
 // Cleanup closes and removes the temporary file if one was created.
 // Safe to call twice and safe when nothing spilled.
 func (s *bodySpool) Cleanup() {
+	if errRelease := s.Release(); errRelease != nil {
+		log.WithError(errRelease).Warn("failed to remove body spool temp file")
+	}
+}
+
+// Release closes and removes the temporary file if one was created and returns the
+// first removal error that is not "not exist". Safe to call twice and safe when
+// nothing spilled.
+func (s *bodySpool) Release() error {
 	if s.file != nil {
 		if errFlush := s.buf.Flush(); errFlush != nil {
 			log.WithError(errFlush).Warn("failed to flush body spool temp file")
@@ -117,10 +168,13 @@ func (s *bodySpool) Cleanup() {
 		s.file = nil
 		s.buf = nil
 	}
-	if s.path != "" {
-		if errRemove := os.Remove(s.path); errRemove != nil {
-			log.WithError(errRemove).Warn("failed to remove body spool temp file")
-		}
-		s.path = ""
+	if s.path == "" {
+		return nil
 	}
+	path := s.path
+	s.path = ""
+	if errRemove := os.Remove(path); errRemove != nil && !os.IsNotExist(errRemove) {
+		return errRemove
+	}
+	return nil
 }

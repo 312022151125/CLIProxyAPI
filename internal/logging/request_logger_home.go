@@ -118,8 +118,10 @@ func newHomeStreamingLogWriter(url, method string, headers map[string][]string, 
 		requestHeaders: requestHeaders,
 		requestBody:    append([]byte(nil), body...),
 		requestID:      strings.TrimSpace(requestID),
-		chunkChan:      make(chan []byte, 100),
-		doneChan:       make(chan struct{}),
+		// 200 entries for the same reason as FileStreamingLogWriter: it absorbed
+		// the response writer's 100-entry channel before chunks were dropped.
+		chunkChan: make(chan []byte, 200),
+		doneChan:  make(chan struct{}),
 	}
 
 	go writer.asyncWriter()

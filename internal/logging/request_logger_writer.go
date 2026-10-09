@@ -243,9 +243,12 @@ func (l *FileRequestLogger) LogStreamingRequest(url, method string, headers map[
 		requestBodyPath:  requestBodyPath,
 		responseBodyPath: responseBodyPath,
 		responseBodyFile: responseBodyFile,
-		chunkChan:        make(chan []byte, 100), // Buffered channel for async writes
-		closeChan:        make(chan struct{}),
-		errorChan:        make(chan error, 1),
+		// 200 entries keeps the buffering the response writer used to provide
+		// in its own 100-entry channel, so a slow disk still absorbs the same
+		// number of chunks before WriteChunkAsync starts dropping them.
+		chunkChan: make(chan []byte, 200),
+		closeChan: make(chan struct{}),
+		errorChan: make(chan error, 1),
 	}
 
 	// Start async writer goroutine

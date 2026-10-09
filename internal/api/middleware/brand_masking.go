@@ -22,28 +22,48 @@ func BrandMaskingMiddleware() gin.HandlerFunc {
 // transformations change byte length; Go's HTTP server then uses chunked encoding.
 type brandMaskingResponseWriter struct {
 	gin.ResponseWriter
+	contentLengthStripped bool
 }
 
 func (w *brandMaskingResponseWriter) Write(data []byte) (int, error) {
 	// Strip Content-Length before the underlying writer emits headers implicitly.
-	w.Header().Del("Content-Length")
-	return w.ResponseWriter.WriteString(maskBrand(string(data)))
+	w.stripContentLength()
+	return w.ResponseWriter.Write(maskBrand(data))
 }
 
 func (w *brandMaskingResponseWriter) WriteString(str string) (int, error) {
-	w.Header().Del("Content-Length")
-	return w.ResponseWriter.WriteString(maskBrand(str))
+	w.stripContentLength()
+	if !containsFoldString(str, "kira") && !containsFoldString(str, "opencode") {
+		return w.ResponseWriter.WriteString(str)
+	}
+	return w.ResponseWriter.Write(maskBrand([]byte(str)))
 }
 
 func (w *brandMaskingResponseWriter) WriteHeader(code int) {
-	w.Header().Del("Content-Length")
+	w.stripContentLength()
 	w.ResponseWriter.WriteHeader(code)
+}
+
+// stripContentLength removes Content-Length once. It must run on every entry
+// point that can emit headers, because a later chunk may still rewrite the body.
+func (w *brandMaskingResponseWriter) stripContentLength() {
+	if w.contentLengthStripped {
+		return
+	}
+	w.Header().Del("Content-Length")
+	w.contentLengthStripped = true
 }
 
 // maskBrand applies the replacements in order: the kiraai.vn domain must be replaced
 // before the bare "Kira AI" token. Upstream error payloads pass through the response
 // writer unchanged, so branding strings they carry (e.g. opencode2api) are rewritten here.
-func maskBrand(s string) string {
+// Every spelling below contains "kira" or "opencode" case-insensitively, so a chunk
+// carrying neither root needle cannot match and is returned unchanged.
+func maskBrand(b []byte) []byte {
+	if !containsFoldASCII(b, "kira") && !containsFoldASCII(b, "opencode") {
+		return b
+	}
+	s := string(b)
 	s = strings.ReplaceAll(s, "kiraai.vn", "llmgate.app")
 	s = strings.ReplaceAll(s, "KIRAAI.VN", "LLMGATE.APP")
 	s = strings.ReplaceAll(s, "opencode2api", "llmgate.app")
@@ -51,5 +71,5 @@ func maskBrand(s string) string {
 	s = strings.ReplaceAll(s, "Kira AI", "Model AI")
 	s = strings.ReplaceAll(s, "kira ai", "model ai")
 	s = strings.ReplaceAll(s, "KIRA AI", "MODEL AI")
-	return s
+	return []byte(s)
 }

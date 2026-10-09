@@ -69,28 +69,47 @@ func isGeminiModel(model string) bool {
 // chunked encoding.
 type antigravityMaskingResponseWriter struct {
 	gin.ResponseWriter
+	contentLengthStripped bool
 }
 
 func (w *antigravityMaskingResponseWriter) Write(data []byte) (int, error) {
 	// Strip Content-Length before the underlying writer emits headers implicitly.
-	w.Header().Del("Content-Length")
-	return w.ResponseWriter.WriteString(maskAntigravity(string(data)))
+	w.stripContentLength()
+	return w.ResponseWriter.Write(maskAntigravity(data))
 }
 
 func (w *antigravityMaskingResponseWriter) WriteString(str string) (int, error) {
-	w.Header().Del("Content-Length")
-	return w.ResponseWriter.WriteString(maskAntigravity(str))
+	w.stripContentLength()
+	if !containsFoldString(str, "antigravity") {
+		return w.ResponseWriter.WriteString(str)
+	}
+	return w.ResponseWriter.Write(maskAntigravity([]byte(str)))
 }
 
 func (w *antigravityMaskingResponseWriter) WriteHeader(code int) {
-	w.Header().Del("Content-Length")
+	w.stripContentLength()
 	w.ResponseWriter.WriteHeader(code)
 }
 
-// maskAntigravity replaces every casing of "antigravity" with "gemini".
-func maskAntigravity(s string) string {
+// stripContentLength removes Content-Length once. It must run on every entry
+// point that can emit headers, because a later chunk may still rewrite the body.
+func (w *antigravityMaskingResponseWriter) stripContentLength() {
+	if w.contentLengthStripped {
+		return
+	}
+	w.Header().Del("Content-Length")
+	w.contentLengthStripped = true
+}
+
+// maskAntigravity replaces every casing of "antigravity" with "gemini". A chunk
+// without the "antigravity" root needle cannot match and is returned unchanged.
+func maskAntigravity(b []byte) []byte {
+	if !containsFoldASCII(b, "antigravity") {
+		return b
+	}
+	s := string(b)
 	s = strings.ReplaceAll(s, "antigravity", "gemini")
 	s = strings.ReplaceAll(s, "Antigravity", "Gemini")
 	s = strings.ReplaceAll(s, "ANTIGRAVITY", "GEMINI")
-	return s
+	return []byte(s)
 }

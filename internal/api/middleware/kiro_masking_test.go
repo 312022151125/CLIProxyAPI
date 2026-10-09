@@ -75,7 +75,7 @@ func TestMaskKiro(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := maskKiro(tt.in, tt.profile); got != tt.want {
+			if got := string(maskKiro([]byte(tt.in), tt.profile)); got != tt.want {
 				t.Errorf("maskKiro(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})

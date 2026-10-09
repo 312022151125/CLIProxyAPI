@@ -40,7 +40,7 @@ func TestMaskAntigravity(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := maskAntigravity(tt.in); got != tt.want {
+			if got := string(maskAntigravity([]byte(tt.in))); got != tt.want {
 				t.Errorf("maskAntigravity(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})

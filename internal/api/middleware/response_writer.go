@@ -49,6 +49,7 @@ type ResponseWriterWrapper struct {
 	headers             map[string][]string        // headers stores the response headers.
 	logOnErrorOnly      bool                       // logOnErrorOnly enables logging only when an error response is detected.
 	firstChunkTimestamp time.Time                  // firstChunkTimestamp captures TTFB for streaming responses.
+	headersCaptured     bool                       // headersCaptured records that the response header snapshot has been taken.
 }
 
 // NewResponseWriterWrapper creates and initializes a new ResponseWriterWrapper.
@@ -162,8 +163,8 @@ func (w *ResponseWriterWrapper) WriteString(data string) (int, error) {
 func (w *ResponseWriterWrapper) WriteHeader(statusCode int) {
 	w.statusCode = statusCode
 
-	// Capture response headers using the new method
-	w.captureCurrentHeaders()
+	// Capture response headers; the wrapper keeps this first snapshot.
+	w.ensureHeadersCaptured()
 
 	// Detect streaming based on Content-Type
 	contentType := w.ResponseWriter.Header().Get("Content-Type")
@@ -196,12 +197,15 @@ func (w *ResponseWriterWrapper) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
-// ensureHeadersCaptured is a helper function to make sure response headers are captured.
-// It is safe to call this method multiple times; it will always refresh the headers
-// with the latest state from the underlying ResponseWriter.
+// ensureHeadersCaptured makes sure response headers are captured exactly once.
+// net/http freezes the header snapshot at WriteHeader (or the first Write), so
+// later captures would only re-copy an unchanged map on every chunk.
 func (w *ResponseWriterWrapper) ensureHeadersCaptured() {
-	// Always capture the current headers to ensure we have the latest state
+	if w.headersCaptured {
+		return
+	}
 	w.captureCurrentHeaders()
+	w.headersCaptured = true
 }
 
 // captureCurrentHeaders reads all headers from the underlying ResponseWriter and stores them

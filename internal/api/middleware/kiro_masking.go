@@ -10,17 +10,35 @@ import (
 )
 
 // maskProfile describes how kiro branding is rewritten for a given request.
+// The cased variants are precomputed once per profile so per-chunk masking only
+// performs the byte replacements.
 type maskProfile struct {
-	domain string // replacement for kiro.dev
-	token  string // replacement for the bare "kiro" token
+	domain      string // replacement for kiro.dev
+	token       string // replacement for the bare "kiro" token
+	domainTitle string // titleFirst(domain), replacement for "Kiro.dev"
+	domainUpper string // uppercase domain, replacement for "KIRO.DEV"
+	tokenTitle  string // titleFirst(token), replacement for "Kiro"
+	tokenUpper  string // uppercase token, replacement for "KIRO"
 }
 
 var (
 	// claudeMaskProfile hides kiro behind Claude branding.
-	claudeMaskProfile = maskProfile{domain: "claude.ai", token: "claude"}
+	claudeMaskProfile = newMaskProfile("claude.ai", "claude")
 	// openAIMaskProfile hides kiro behind OpenAI branding.
-	openAIMaskProfile = maskProfile{domain: "openai.com", token: "gpt"}
+	openAIMaskProfile = newMaskProfile("openai.com", "gpt")
 )
+
+// newMaskProfile builds a profile with every cased replacement precomputed.
+func newMaskProfile(domain, token string) maskProfile {
+	return maskProfile{
+		domain:      domain,
+		token:       token,
+		domainTitle: titleFirst(domain),
+		domainUpper: strings.ToUpper(domain),
+		tokenTitle:  titleFirst(token),
+		tokenUpper:  strings.ToUpper(token),
+	}
+}
 
 // KiroMaskingMiddleware wraps responses for masked models and replaces kiro.dev
 // and kiro in the body, so clients perceive the service as Claude or OpenAI
@@ -108,35 +126,54 @@ func matchesGPT56Model(m string) bool {
 // transformations change byte length; Go's HTTP server then uses chunked encoding.
 type kiroMaskingResponseWriter struct {
 	gin.ResponseWriter
-	profile maskProfile
+	profile               maskProfile
+	contentLengthStripped bool
 }
 
 func (w *kiroMaskingResponseWriter) Write(data []byte) (int, error) {
 	// Strip Content-Length before the underlying writer emits headers implicitly.
-	w.Header().Del("Content-Length")
-	return w.ResponseWriter.WriteString(maskKiro(string(data), w.profile))
+	w.stripContentLength()
+	return w.ResponseWriter.Write(maskKiro(data, w.profile))
 }
 
 func (w *kiroMaskingResponseWriter) WriteString(str string) (int, error) {
-	w.Header().Del("Content-Length")
-	return w.ResponseWriter.WriteString(maskKiro(str, w.profile))
+	w.stripContentLength()
+	if !containsFoldString(str, "kiro") {
+		return w.ResponseWriter.WriteString(str)
+	}
+	return w.ResponseWriter.Write(maskKiro([]byte(str), w.profile))
 }
 
 func (w *kiroMaskingResponseWriter) WriteHeader(code int) {
-	w.Header().Del("Content-Length")
+	w.stripContentLength()
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// stripContentLength removes Content-Length once. It must run on every entry
+// point that can emit headers, because a later chunk may still rewrite the body.
+func (w *kiroMaskingResponseWriter) stripContentLength() {
+	if w.contentLengthStripped {
+		return
+	}
+	w.Header().Del("Content-Length")
+	w.contentLengthStripped = true
+}
+
 // maskKiro applies the replacements in order: the kiro.dev domain must be replaced
-// before the bare "kiro" token so it never becomes <token>.dev.
-func maskKiro(s string, profile maskProfile) string {
+// before the bare "kiro" token so it never becomes <token>.dev. It returns b
+// unchanged when no kiro spelling is present, without allocating.
+func maskKiro(b []byte, profile maskProfile) []byte {
+	if !containsFoldASCII(b, "kiro") {
+		return b
+	}
+	s := string(b)
 	s = strings.ReplaceAll(s, "kiro.dev", profile.domain)
-	s = strings.ReplaceAll(s, "Kiro.dev", titleFirst(profile.domain))
-	s = strings.ReplaceAll(s, "KIRO.DEV", strings.ToUpper(profile.domain))
+	s = strings.ReplaceAll(s, "Kiro.dev", profile.domainTitle)
+	s = strings.ReplaceAll(s, "KIRO.DEV", profile.domainUpper)
 	s = strings.ReplaceAll(s, "kiro", profile.token)
-	s = strings.ReplaceAll(s, "Kiro", titleFirst(profile.token))
-	s = strings.ReplaceAll(s, "KIRO", strings.ToUpper(profile.token))
-	return s
+	s = strings.ReplaceAll(s, "Kiro", profile.tokenTitle)
+	s = strings.ReplaceAll(s, "KIRO", profile.tokenUpper)
+	return []byte(s)
 }
 
 // titleFirst upper-cases the first character, matching Kiro -> Claude casing.

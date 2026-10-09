@@ -9,7 +9,7 @@ import (
 )
 
 // benchChunk is a clean SSE-sized chunk: it carries no masking token, so the
-// masking writers must forward it without rewriting or allocating.
+// masking writer must forward it without rewriting or allocating.
 func benchChunk() []byte {
 	chunk := make([]byte, 1024)
 	for i := range chunk {
@@ -42,22 +42,67 @@ func newBenchGinWriter() (*gin.Context, *httptest.ResponseRecorder) {
 	return c, rec
 }
 
-func BenchmarkBrandMaskingResponseWriterStreamChunk(b *testing.B) {
+func benchmarkMasking(b *testing.B, set maskRuleSet) {
 	c, _ := newBenchGinWriter()
-	w := &brandMaskingResponseWriter{ResponseWriter: c.Writer}
+	w := &maskingResponseWriter{ResponseWriter: c.Writer, set: set}
+	c.Writer = w
 	benchWriteChunks(b, w.Write)
 }
 
-func BenchmarkKiroMaskingResponseWriterStreamChunk(b *testing.B) {
+// discardResponseWriter drops the body so a benchmark measures the masking
+// writer alone. httptest.ResponseRecorder grows a bytes.Buffer per write, which
+// swamps the masking delta with buffer-doubling allocations.
+type discardResponseWriter struct {
+	gin.ResponseWriter
+}
+
+func (w discardResponseWriter) Write(b []byte) (int, error)       { return len(b), nil }
+func (w discardResponseWriter) WriteString(s string) (int, error) { return len(s), nil }
+
+func newDiscardGinWriter() *gin.Context {
+	gin.SetMode(gin.TestMode)
 	c, _ := newBenchGinWriter()
-	w := &kiroMaskingResponseWriter{ResponseWriter: c.Writer, profile: claudeMaskProfile}
+	c.Writer = discardResponseWriter{ResponseWriter: c.Writer}
+	return c
+}
+
+func benchmarkMaskingDiscard(b *testing.B, set maskRuleSet) {
+	b.Helper()
+	c := newDiscardGinWriter()
+	w := &maskingResponseWriter{ResponseWriter: c.Writer, set: set}
+	c.Writer = w
 	benchWriteChunks(b, w.Write)
 }
 
-func BenchmarkAntigravityMaskingResponseWriterStreamChunk(b *testing.B) {
-	c, _ := newBenchGinWriter()
-	w := &antigravityMaskingResponseWriter{ResponseWriter: c.Writer}
-	benchWriteChunks(b, w.Write)
+// BenchmarkMaskingDiscardBrandOnly measures the brand-only path with no
+// recorder buffer in the way.
+func BenchmarkMaskingDiscardBrandOnly(b *testing.B) {
+	benchmarkMaskingDiscard(b, brandOnlySet)
+}
+
+// BenchmarkMaskingDiscardClaude measures brand + kiro without recorder noise.
+func BenchmarkMaskingDiscardClaude(b *testing.B) {
+	benchmarkMaskingDiscard(b, brandClaudeSet)
+}
+
+// BenchmarkMaskingDiscardGemini measures brand + antigravity without recorder noise.
+func BenchmarkMaskingDiscardGemini(b *testing.B) {
+	benchmarkMaskingDiscard(b, brandAntigravitySet)
+}
+
+// BenchmarkMaskingResponseWriterBrandOnly covers a request with no profile writer.
+func BenchmarkMaskingResponseWriterBrandOnly(b *testing.B) {
+	benchmarkMasking(b, brandOnlySet)
+}
+
+// BenchmarkMaskingResponseWriterClaude covers a claude-* request: brand + kiro.
+func BenchmarkMaskingResponseWriterClaude(b *testing.B) {
+	benchmarkMasking(b, brandClaudeSet)
+}
+
+// BenchmarkMaskingResponseWriterGemini covers a gemini-* request: brand + antigravity.
+func BenchmarkMaskingResponseWriterGemini(b *testing.B) {
+	benchmarkMasking(b, brandAntigravitySet)
 }
 
 // BenchmarkResponseWriterWrapperHeaderCapture measures the per-chunk header

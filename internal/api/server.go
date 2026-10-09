@@ -168,10 +168,8 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 
 	engine.Use(corsMiddleware())
 	// Masking runs last so its response writer wraps every other middleware's
-	// output, sanitizing kiro branding on all responses.
-	engine.Use(middleware.KiroMaskingMiddleware())
-	engine.Use(middleware.BrandMaskingMiddleware())
-	engine.Use(middleware.AntigravityMaskingMiddleware())
+	// output, sanitizing every third-party brand on all responses.
+	engine.Use(middleware.MaskingMiddleware())
 	wd, err := os.Getwd()
 	if err != nil {
 		wd = configFilePath

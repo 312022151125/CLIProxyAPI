@@ -71,7 +71,7 @@ func NewResponseWriterWrapper(w gin.ResponseWriter, logger logging.RequestLogger
 
 // Write wraps the underlying ResponseWriter's Write method to capture response data.
 // For non-streaming responses, it writes to an internal buffer. For streaming responses,
-// it sends data chunks to a non-blocking channel for asynchronous logging.
+// it copies the chunk into the stream writer's spool.
 // CRITICAL: This method prioritizes writing to the client to ensure zero latency,
 // handling logging operations subsequently.
 func (w *ResponseWriterWrapper) Write(data []byte) (int, error) {
@@ -88,8 +88,9 @@ func (w *ResponseWriterWrapper) Write(data []byte) (int, error) {
 		if w.firstChunkTimestamp.IsZero() {
 			w.firstChunkTimestamp = time.Now()
 		}
-		// Hand the private copy to the stream writer; its send is non-blocking.
-		w.streamWriter.WriteChunkAsync(append([]byte(nil), data...))
+		// The stream writer copies the chunk into its spool before returning,
+		// so the caller's buffer is not retained and no private copy is needed.
+		w.streamWriter.WriteChunkAsync(data)
 		return n, err
 	}
 

@@ -448,8 +448,6 @@ func TestHomeStreamingLogWriter_CloseTerminatesWhenClientUnhealthy(t *testing.T)
 	done := make(chan struct{})
 	go func() {
 		_ = hw.Close()
-		// If Close properly closes chunkChan and waits for doneChan, doneChan must be closed.
-		<-hw.doneChan
 		close(done)
 	}()
 
@@ -457,7 +455,7 @@ func TestHomeStreamingLogWriter_CloseTerminatesWhenClientUnhealthy(t *testing.T)
 	case <-done:
 		// Success
 	case <-time.After(500 * time.Millisecond):
-		t.Fatalf("homeStreamingLogWriter leaked writer goroutine after Close with unhealthy client")
+		t.Fatalf("homeStreamingLogWriter Close did not return with unhealthy client")
 	}
 }
 

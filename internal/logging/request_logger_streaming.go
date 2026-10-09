@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"os"
@@ -86,13 +87,11 @@ func (w *FileStreamingLogWriter) WriteChunkAsync(chunk []byte) {
 		return
 	}
 
-	// Make a copy of the chunk to avoid data races
-	chunkCopy := make([]byte, len(chunk))
-	copy(chunkCopy, chunk)
-
-	// Non-blocking send
+	// Non-blocking send. The caller owns chunk (the response writer hands over
+	// a private copy), so no second copy is made here; dropping chunks when the
+	// channel is full is accepted to avoid blocking the response path.
 	select {
-	case w.chunkChan <- chunkCopy:
+	case w.chunkChan <- chunk:
 	default:
 		// Channel is full, skip this chunk to avoid blocking
 	}
@@ -242,14 +241,21 @@ func (w *FileStreamingLogWriter) Close() error {
 
 // asyncWriter runs in a goroutine to buffer chunks from the channel.
 // It continuously reads chunks from the channel and appends them to a temp file for later assembly.
+// Writes are buffered so a burst of small SSE chunks costs one write syscall
+// instead of one per chunk; the bytes written are identical.
 func (w *FileStreamingLogWriter) asyncWriter() {
 	defer close(w.closeChan)
+
+	var buffered *bufio.Writer
+	if w.responseBodyFile != nil {
+		buffered = bufio.NewWriterSize(w.responseBodyFile, 64*1024)
+	}
 
 	for chunk := range w.chunkChan {
 		if w.responseBodyFile == nil {
 			continue
 		}
-		if _, errWrite := w.responseBodyFile.Write(chunk); errWrite != nil {
+		if _, errWrite := buffered.Write(chunk); errWrite != nil {
 			select {
 			case w.errorChan <- errWrite:
 			default:
@@ -266,6 +272,12 @@ func (w *FileStreamingLogWriter) asyncWriter() {
 
 	if w.responseBodyFile == nil {
 		return
+	}
+	if errFlush := buffered.Flush(); errFlush != nil {
+		select {
+		case w.errorChan <- errFlush:
+		default:
+		}
 	}
 	if errClose := w.responseBodyFile.Close(); errClose != nil {
 		select {

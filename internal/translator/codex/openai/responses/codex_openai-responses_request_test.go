@@ -538,7 +538,7 @@ func TestServiceTierValidation_FastNormalizedToPriority(t *testing.T) {
 		"input": [{"role":"user","content":"hello"}]
 	}`)
 
-	output := ConvertOpenAIResponsesRequestToCodex("gpt-5.2", inputJSON, false)
+	output, _ := ConvertOpenAIResponsesRequestToCodex("gpt-5.2", inputJSON, false)
 	outputStr := string(output)
 
 	serviceTier := gjson.Get(outputStr, "service_tier")
@@ -557,7 +557,7 @@ func TestServiceTierNormalization_PriorityUnchanged(t *testing.T) {
 		"input": [{"role":"user","content":"hello"}]
 	}`)
 
-	output := ConvertOpenAIResponsesRequestToCodex("gpt-5.2", inputJSON, false)
+	output, _ := ConvertOpenAIResponsesRequestToCodex("gpt-5.2", inputJSON, false)
 	outputStr := string(output)
 
 	serviceTier := gjson.Get(outputStr, "service_tier")
@@ -576,7 +576,7 @@ func TestServiceTierNormalization_UnsupportedRemoved(t *testing.T) {
 		"input": [{"role":"user","content":"hello"}]
 	}`)
 
-	output := ConvertOpenAIResponsesRequestToCodex("gpt-5.2", inputJSON, false)
+	output, _ := ConvertOpenAIResponsesRequestToCodex("gpt-5.2", inputJSON, false)
 	outputStr := string(output)
 
 	serviceTier := gjson.Get(outputStr, "service_tier")
@@ -591,7 +591,7 @@ func TestServiceTierNormalization_NoServiceTier(t *testing.T) {
 		"input": [{"role":"user","content":"hello"}]
 	}`)
 
-	output := ConvertOpenAIResponsesRequestToCodex("gpt-5.2", inputJSON, false)
+	output, _ := ConvertOpenAIResponsesRequestToCodex("gpt-5.2", inputJSON, false)
 	outputStr := string(output)
 
 	serviceTier := gjson.Get(outputStr, "service_tier")
